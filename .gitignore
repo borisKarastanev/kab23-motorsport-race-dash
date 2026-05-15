@@ -1,0 +1,21 @@
+# Claude Code
+CLAUDE.md
+.claude/
+
+# Build
+build/
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+Makefile
+
+# Qt
+*.moc
+moc_*.cpp
+qrc_*.cpp
+ui_*.h
+*.pro.user
+
+# OS
+.DS_Store
+Thumbs.db
