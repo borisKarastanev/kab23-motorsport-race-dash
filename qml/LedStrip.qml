@@ -5,31 +5,29 @@ Item {
 
     property int rpm:            0
     property int ledCount:       10
-    property int greenStart:     4500
-    property int yellowStart:    6000
-    property int redStart:       6500
-    property int flashStart:     6750
     property int flashIntervalMs: 80
 
-    // RPM span covered by one LED in the green zone
-    readonly property real rpmPerLed: (yellowStart - greenStart) / Math.max(ledCount, 1)
+    // Pair thresholds, outside-in (pair 0 = outermost, pair 4 = centre)
+    // Pairs 0-1: green  |  Pairs 2-3: yellow  |  Pair 4: red + flash
+    property int pair0Rpm:   5800
+    property int pair1Rpm:   6000
+    property int pair2Rpm:   6200
+    property int pair3Rpm:   6500
+    property int pair4Rpm:   6600
+    property int allBlueRpm: 6750
 
-    readonly property int  litCount:   rpm < greenStart ? 0
-                                     : Math.min(ledCount, Math.floor((rpm - greenStart) / rpmPerLed) + 1)
-    readonly property bool isYellow:   rpm >= yellowStart && rpm < redStart
-    readonly property bool isRed:      rpm >= redStart
-    readonly property bool isFlashing: rpm >= flashStart
+    readonly property var pairThresholds: [pair0Rpm, pair1Rpm, pair2Rpm, pair3Rpm, pair4Rpm]
+    readonly property var pairBaseColors: ["#00dd44", "#00dd44", "#ffcc00", "#ffcc00", "#ff2200"]
 
-    readonly property color activeColor: isRed    ? "#ff2200"
-                                       : isYellow ? "#ffcc00"
-                                       : "#00dd44"
+    readonly property bool isAllBlue:        rpm >= allBlueRpm
+    readonly property bool isCenterFlashing: rpm >= pair4Rpm
 
     property real flashAlpha: 1.0
 
-    onIsFlashingChanged: if (!isFlashing) flashAlpha = 1.0
+    onIsCenterFlashingChanged: if (!isCenterFlashing) flashAlpha = 1.0
 
     SequentialAnimation on flashAlpha {
-        running: root.isFlashing
+        running: root.isCenterFlashing
         loops:   Animation.Infinite
         NumberAnimation { to: 0.1; duration: root.flashIntervalMs }
         NumberAnimation { to: 1.0; duration: root.flashIntervalMs }
@@ -43,22 +41,39 @@ Item {
             model: root.ledCount
 
             Rectangle {
-                readonly property bool lit: index < root.litCount
+                // Mirror index so both halves resolve to the same pair threshold
+                readonly property int pairIndex: index < (root.ledCount / 2)
+                                                 ? index
+                                                 : (root.ledCount - 1 - index)
+                readonly property bool lit: root.rpm >= root.pairThresholds[pairIndex]
 
-                width:   (root.width - (root.ledCount - 1) * 6) / root.ledCount
-                height:  root.height
-                radius:  4
-                color:   lit ? root.activeColor : "#181818"
-                border.color: lit ? Qt.darker(root.activeColor, 1.5) : "#2a2a2a"
+                readonly property color ledColor: {
+                    if (!lit) return "#181818"
+                    if (root.isAllBlue) return "#0088ff"
+                    return root.pairBaseColors[pairIndex]
+                }
+
+                // Flash: centre pair when red zone active; all lit LEDs once all-blue kicks in
+                readonly property bool shouldFlash: {
+                    if (!lit) return false
+                    if (root.isAllBlue) return true
+                    return pairIndex === (root.ledCount / 2 - 1)
+                }
+
+                width:  (root.width - (root.ledCount - 1) * 6) / root.ledCount
+                height: root.height
+                radius: 4
+                color:  ledColor
+                border.color: lit ? Qt.darker(ledColor, 1.5) : "#2a2a2a"
                 border.width: 1
-                opacity: lit && root.isFlashing ? root.flashAlpha : 1.0
+                opacity: shouldFlash ? root.flashAlpha : 1.0
 
                 Rectangle {
                     visible: parent.lit
                     anchors { top: parent.top; left: parent.left; right: parent.right; margins: 1 }
-                    height:  parent.height * 0.35
-                    radius:  parent.radius
-                    color:   "white"
+                    height: parent.height * 0.35
+                    radius: parent.radius
+                    color:  "white"
                     opacity: 0.18
                 }
             }

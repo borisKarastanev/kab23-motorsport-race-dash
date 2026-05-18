@@ -13,7 +13,7 @@ Rectangle {
 
     readonly property bool   isWarning:     value >= warningThreshold && value < dangerThreshold
     readonly property bool   isDanger:      value >= dangerThreshold
-    readonly property real   fillRatio:     Qt.clamp(value / maxValue, 0, 1)
+
     readonly property string formattedValue: value.toFixed(decimalPlaces)
 
     // Shared accent colours — border and fill bar use the same bright shades
@@ -49,32 +49,9 @@ Rectangle {
         font.family: "monospace"
     }
 
-    // Declared before Unit text — avoids a forward-anchor layout pass on every update
-    Rectangle {
-        id: valueBar
-        anchors.bottom: parent.bottom
-        anchors.left: parent.left
-        anchors.right: parent.right
-        anchors.bottomMargin: 2
-        anchors.leftMargin: 2
-        anchors.rightMargin: 2
-        height: 5
-        color: "#1a1a1a"
-        radius: 2
-
-        Rectangle {
-            anchors.left: parent.left
-            anchors.top: parent.top
-            anchors.bottom: parent.bottom
-            width: parent.width * root.fillRatio
-            color: root.stateColor(root.alertDanger, root.alertWarning, "#00cc44")
-            radius: 2
-        }
-    }
-
     Text {
-        anchors.bottom: valueBar.top
-        anchors.bottomMargin: 8
+        anchors.bottom: parent.bottom
+        anchors.bottomMargin: 12
         anchors.horizontalCenter: parent.horizontalCenter
         text: root.unit
         color: root.isWarning || root.isDanger ? "#cccccc" : "#555555"
