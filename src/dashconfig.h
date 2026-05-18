@@ -17,7 +17,8 @@ class DashConfig : public QObject {
     Q_PROPERTY(int allBlueRpm      READ allBlueRpm      CONSTANT)
     Q_PROPERTY(int limiterRpm      READ limiterRpm      CONSTANT)
 
-    // --- Gauge visibility & position (left | right | bottom) -----------------
+    // --- Gauge visibility & position (left | center | right | bottom) --------
+    Q_PROPERTY(bool    gearVisible     READ gearVisible     CONSTANT)
     Q_PROPERTY(bool    rpmVisible      READ rpmVisible      CONSTANT)
     Q_PROPERTY(QString rpmPosition     READ rpmPosition     CONSTANT)
     Q_PROPERTY(bool    speedVisible    READ speedVisible    CONSTANT)
@@ -40,6 +41,7 @@ public:
     int     allBlueRpm()      const { return m_allBlueRpm; }
     int     limiterRpm()      const { return m_limiterRpm; }
 
+    bool    gearVisible()     const { return m_gearVisible; }
     bool    rpmVisible()      const { return m_rpmVisible; }
     QString rpmPosition()     const { return m_rpmPosition; }
     bool    speedVisible()    const { return m_speedVisible; }
@@ -60,12 +62,13 @@ private:
     int     m_allBlueRpm      = 6750;
     int     m_limiterRpm      = 6800;
 
+    bool    m_gearVisible     = true;
     bool    m_rpmVisible      = true;
     QString m_rpmPosition     = "left";
     bool    m_speedVisible    = true;
-    QString m_speedPosition   = "right";
+    QString m_speedPosition   = "center";
     bool    m_coolantVisible  = true;
-    QString m_coolantPosition = "left";
+    QString m_coolantPosition = "right";
     bool    m_oilTempVisible  = true;
     QString m_oilTempPosition = "right";
 };

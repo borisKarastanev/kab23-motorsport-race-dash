@@ -3,6 +3,7 @@
     <qresource prefix="/">
         <file>qml/main.qml</file>
         <file>qml/Gauge.qml</file>
+        <file>qml/GearIndicator.qml</file>
         <file>qml/LedStrip.qml</file>
     </qresource>
 </RCC>
