@@ -9,6 +9,62 @@ Window {
     title: "BMW E46 Dashboard"
     color: "#0a0a0a"
 
+    function zoneHasContent(zone) {
+        return (dashConfig.rpmVisible     && dashConfig.rpmPosition     === zone) ||
+               (dashConfig.speedVisible   && dashConfig.speedPosition   === zone) ||
+               (dashConfig.coolantVisible && dashConfig.coolantPosition === zone) ||
+               (dashConfig.oilTempVisible && dashConfig.oilTempPosition === zone)
+    }
+
+    Component {
+        id: rpmComp
+        Gauge {
+            anchors.fill: parent
+            label: "RPM"
+            value: dataModel.rpm
+            maxValue: 8000
+        }
+    }
+
+    Component {
+        id: speedComp
+        Gauge {
+            anchors.fill: parent
+            label: "SPEED"
+            unit: "km/h"
+            value: dataModel.speed
+            maxValue: 240
+        }
+    }
+
+    Component {
+        id: coolantComp
+        Gauge {
+            anchors.fill: parent
+            label: "COOLANT"
+            unit: "°C"
+            value: dataModel.coolantTemp
+            maxValue: 120
+            decimalPlaces: 1
+            warningThreshold: 95
+            dangerThreshold: 105
+        }
+    }
+
+    Component {
+        id: oilTempComp
+        Gauge {
+            anchors.fill: parent
+            label: "OIL TEMP"
+            unit: "°C"
+            value: dataModel.oilTemp
+            maxValue: 150
+            decimalPlaces: 1
+            warningThreshold: 120
+            dangerThreshold: 135
+        }
+    }
+
     ColumnLayout {
         anchors.fill: parent
         anchors.margins: 8
@@ -28,49 +84,49 @@ Window {
             allBlueRpm:      dashConfig.allBlueRpm
         }
 
-        GridLayout {
+        RowLayout {
             Layout.fillWidth: true
             Layout.fillHeight: true
-            columns: 2
-            rowSpacing: 8
-            columnSpacing: 8
+            spacing: 8
+            visible: zoneHasContent("left") || zoneHasContent("right")
 
-            Gauge {
-                Layout.fillWidth: true;  Layout.fillHeight: true
-                label: "RPM"
-                value: dataModel.rpm
-                maxValue: 8000
+            ColumnLayout {
+                id: leftPanel
+                Layout.fillWidth: true
+                Layout.fillHeight: true
+                spacing: 8
+                visible: zoneHasContent("left")
+
+                Loader { active: dashConfig.rpmVisible     && dashConfig.rpmPosition     === "left"; visible: active; Layout.fillWidth: true; Layout.fillHeight: true; sourceComponent: rpmComp }
+                Loader { active: dashConfig.speedVisible   && dashConfig.speedPosition   === "left"; visible: active; Layout.fillWidth: true; Layout.fillHeight: true; sourceComponent: speedComp }
+                Loader { active: dashConfig.coolantVisible && dashConfig.coolantPosition === "left"; visible: active; Layout.fillWidth: true; Layout.fillHeight: true; sourceComponent: coolantComp }
+                Loader { active: dashConfig.oilTempVisible && dashConfig.oilTempPosition === "left"; visible: active; Layout.fillWidth: true; Layout.fillHeight: true; sourceComponent: oilTempComp }
             }
 
-            Gauge {
-                Layout.fillWidth: true;  Layout.fillHeight: true
-                label: "SPEED"
-                unit: "km/h"
-                value: dataModel.speed
-                maxValue: 240
-            }
+            ColumnLayout {
+                id: rightPanel
+                Layout.fillWidth: true
+                Layout.fillHeight: true
+                spacing: 8
+                visible: zoneHasContent("right")
 
-            Gauge {
-                Layout.fillWidth: true;  Layout.fillHeight: true
-                label: "COOLANT"
-                unit: "°C"
-                value: dataModel.coolantTemp
-                maxValue: 120
-                decimalPlaces: 1
-                warningThreshold: 95
-                dangerThreshold: 105
+                Loader { active: dashConfig.rpmVisible     && dashConfig.rpmPosition     === "right"; visible: active; Layout.fillWidth: true; Layout.fillHeight: true; sourceComponent: rpmComp }
+                Loader { active: dashConfig.speedVisible   && dashConfig.speedPosition   === "right"; visible: active; Layout.fillWidth: true; Layout.fillHeight: true; sourceComponent: speedComp }
+                Loader { active: dashConfig.coolantVisible && dashConfig.coolantPosition === "right"; visible: active; Layout.fillWidth: true; Layout.fillHeight: true; sourceComponent: coolantComp }
+                Loader { active: dashConfig.oilTempVisible && dashConfig.oilTempPosition === "right"; visible: active; Layout.fillWidth: true; Layout.fillHeight: true; sourceComponent: oilTempComp }
             }
+        }
 
-            Gauge {
-                Layout.fillWidth: true;  Layout.fillHeight: true
-                label: "OIL TEMP"
-                unit: "°C"
-                value: dataModel.oilTemp
-                maxValue: 150
-                decimalPlaces: 1
-                warningThreshold: 120
-                dangerThreshold: 135
-            }
+        RowLayout {
+            Layout.fillWidth: true
+            Layout.preferredHeight: 160
+            spacing: 8
+            visible: zoneHasContent("bottom")
+
+            Loader { active: dashConfig.rpmVisible     && dashConfig.rpmPosition     === "bottom"; visible: active; Layout.fillWidth: true; Layout.fillHeight: true; sourceComponent: rpmComp }
+            Loader { active: dashConfig.speedVisible   && dashConfig.speedPosition   === "bottom"; visible: active; Layout.fillWidth: true; Layout.fillHeight: true; sourceComponent: speedComp }
+            Loader { active: dashConfig.coolantVisible && dashConfig.coolantPosition === "bottom"; visible: active; Layout.fillWidth: true; Layout.fillHeight: true; sourceComponent: coolantComp }
+            Loader { active: dashConfig.oilTempVisible && dashConfig.oilTempPosition === "bottom"; visible: active; Layout.fillWidth: true; Layout.fillHeight: true; sourceComponent: oilTempComp }
         }
     }
 }
