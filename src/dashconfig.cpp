@@ -26,20 +26,22 @@ static void writeDefaultConfig(const QString &path)
         "# Total number of LEDs in the shift-light strip\n"
         "LedCount = 10\n"
         "\n"
-        "# RPM at which the first LED lights (green zone begins)\n"
-        "GreenStart = 4500\n"
-        "\n"
-        "# RPM at which all LEDs are lit and colour switches to yellow\n"
-        "YellowStart = 6000\n"
-        "\n"
-        "# RPM at which colour switches from yellow to red\n"
-        "RedStart = 6500\n"
-        "\n"
-        "# RPM at which all LEDs start flashing\n"
-        "FlashStart = 6750\n"
-        "\n"
         "# Flash blink half-period in milliseconds (lower = faster flash)\n"
-        "FlashIntervalMs = 80\n";
+        "FlashIntervalMs = 80\n"
+        "\n"
+        "# RPM thresholds per pair, outside-in (pair 0 = outermost, pair 4 = centre)\n"
+        "# Pairs 0-1 light green, pairs 2-3 light yellow, pair 4 lights red and flashes\n"
+        "Pair0Rpm = 5800\n"
+        "Pair1Rpm = 6000\n"
+        "Pair2Rpm = 6200\n"
+        "Pair3Rpm = 6500\n"
+        "Pair4Rpm = 6600\n"
+        "\n"
+        "# RPM at which all LEDs switch to blue and flash together\n"
+        "AllBlueRpm = 6750\n"
+        "\n"
+        "# Limiter RPM (informational)\n"
+        "LimiterRpm = 6800\n";
 }
 
 DashConfig::DashConfig(QObject *parent) : QObject(parent)
@@ -52,10 +54,13 @@ DashConfig::DashConfig(QObject *parent) : QObject(parent)
     QSettings s(path, QSettings::IniFormat);
     s.beginGroup("LedStrip");
     m_ledCount        = s.value("LedCount",        m_ledCount).toInt();
-    m_greenStart      = s.value("GreenStart",      m_greenStart).toInt();
-    m_yellowStart     = s.value("YellowStart",     m_yellowStart).toInt();
-    m_redStart        = s.value("RedStart",        m_redStart).toInt();
-    m_flashStart      = s.value("FlashStart",      m_flashStart).toInt();
     m_flashIntervalMs = s.value("FlashIntervalMs", m_flashIntervalMs).toInt();
+    m_pair0Rpm        = s.value("Pair0Rpm",        m_pair0Rpm).toInt();
+    m_pair1Rpm        = s.value("Pair1Rpm",        m_pair1Rpm).toInt();
+    m_pair2Rpm        = s.value("Pair2Rpm",        m_pair2Rpm).toInt();
+    m_pair3Rpm        = s.value("Pair3Rpm",        m_pair3Rpm).toInt();
+    m_pair4Rpm        = s.value("Pair4Rpm",        m_pair4Rpm).toInt();
+    m_allBlueRpm      = s.value("AllBlueRpm",      m_allBlueRpm).toInt();
+    m_limiterRpm      = s.value("LimiterRpm",      m_limiterRpm).toInt();
     s.endGroup();
 }

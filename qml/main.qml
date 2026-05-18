@@ -19,11 +19,13 @@ Window {
             height: 26
             rpm:             dataModel.rpm
             ledCount:        dashConfig.ledCount
-            greenStart:      dashConfig.greenStart
-            yellowStart:     dashConfig.yellowStart
-            redStart:        dashConfig.redStart
-            flashStart:      dashConfig.flashStart
             flashIntervalMs: dashConfig.flashIntervalMs
+            pair0Rpm:        dashConfig.pair0Rpm
+            pair1Rpm:        dashConfig.pair1Rpm
+            pair2Rpm:        dashConfig.pair2Rpm
+            pair3Rpm:        dashConfig.pair3Rpm
+            pair4Rpm:        dashConfig.pair4Rpm
+            allBlueRpm:      dashConfig.allBlueRpm
         }
 
         GridLayout {
