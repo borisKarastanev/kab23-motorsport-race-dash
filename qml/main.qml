@@ -10,6 +10,7 @@ Window {
     color: "#0a0a0a"
 
     function zoneHasContent(zone) {
+        if (zone === "center" && dashConfig.gearVisible) return true
         return (dashConfig.rpmVisible     && dashConfig.rpmPosition     === zone) ||
                (dashConfig.speedVisible   && dashConfig.speedPosition   === zone) ||
                (dashConfig.coolantVisible && dashConfig.coolantPosition === zone) ||
@@ -88,7 +89,7 @@ Window {
             Layout.fillWidth: true
             Layout.fillHeight: true
             spacing: 8
-            visible: zoneHasContent("left") || zoneHasContent("right")
+            visible: zoneHasContent("left") || zoneHasContent("center") || zoneHasContent("right")
 
             ColumnLayout {
                 id: leftPanel
@@ -101,6 +102,26 @@ Window {
                 Loader { active: dashConfig.speedVisible   && dashConfig.speedPosition   === "left"; visible: active; Layout.fillWidth: true; Layout.fillHeight: true; sourceComponent: speedComp }
                 Loader { active: dashConfig.coolantVisible && dashConfig.coolantPosition === "left"; visible: active; Layout.fillWidth: true; Layout.fillHeight: true; sourceComponent: coolantComp }
                 Loader { active: dashConfig.oilTempVisible && dashConfig.oilTempPosition === "left"; visible: active; Layout.fillWidth: true; Layout.fillHeight: true; sourceComponent: oilTempComp }
+            }
+
+            ColumnLayout {
+                id: centerPanel
+                Layout.fillWidth: true
+                Layout.fillHeight: true
+                spacing: 8
+                visible: zoneHasContent("center")
+
+                GearIndicator {
+                    visible: dashConfig.gearVisible
+                    Layout.fillWidth: true
+                    Layout.fillHeight: true
+                    gear: dataModel.gear
+                }
+
+                Loader { active: dashConfig.rpmVisible     && dashConfig.rpmPosition     === "center"; visible: active; Layout.fillWidth: true; Layout.fillHeight: true; sourceComponent: rpmComp }
+                Loader { active: dashConfig.speedVisible   && dashConfig.speedPosition   === "center"; visible: active; Layout.fillWidth: true; Layout.fillHeight: true; sourceComponent: speedComp }
+                Loader { active: dashConfig.coolantVisible && dashConfig.coolantPosition === "center"; visible: active; Layout.fillWidth: true; Layout.fillHeight: true; sourceComponent: coolantComp }
+                Loader { active: dashConfig.oilTempVisible && dashConfig.oilTempPosition === "center"; visible: active; Layout.fillWidth: true; Layout.fillHeight: true; sourceComponent: oilTempComp }
             }
 
             ColumnLayout {

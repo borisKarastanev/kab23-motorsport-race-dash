@@ -46,18 +46,22 @@ void MockCanProvider::onTick()
     // --- RPM + Speed: 5-gear acceleration loop ---
     const int cycleTick = static_cast<int>(m_tick % CYCLE_TICKS);
 
-    int    rpm   = SHIFT_RPM;
+    int    rpm    = SHIFT_RPM;
     double speedD = 220.0;
+    int    gear   = 1;
 
     int tickStart = 0;
+    int gearIdx   = 0;
     for (const GearData &g : GEARS) {
         if (cycleTick < tickStart + g.durationTicks) {
             const double p = static_cast<double>(cycleTick - tickStart) / g.durationTicks;
             rpm    = static_cast<int>(g.entryRpm + (SHIFT_RPM - g.entryRpm) * p);
             speedD = g.entrySpeed + (g.exitSpeed - g.entrySpeed) * p;
+            gear   = gearIdx + 1;
             break;
         }
         tickStart += g.durationTicks;
+        ++gearIdx;
     }
 
     // --- Temperature ramps (independent of gear state) ---
@@ -67,18 +71,19 @@ void MockCanProvider::onTick()
     emit frameReady(rpmFrame(rpm));
     emit frameReady(tempFrame(20.0 + coolantProgress * 70.0, 20.0 + oilProgress * 90.0));
     emit frameReady(speedFrame(static_cast<int>(speedD)));
+    emit frameReady(gearFrame(gear));
 }
 
 QCanBusFrame MockCanProvider::rpmFrame(int rpm)
 {
-    static QByteArray payload(8, 0x00);
+    QByteArray payload(8, 0x00);
     qToBigEndian<quint16>(CanScaling::encodeRpm(rpm), payload.data() + 2);
     return QCanBusFrame(CanScaling::kFrameRpm, payload);
 }
 
 QCanBusFrame MockCanProvider::tempFrame(double coolant, double oil)
 {
-    static QByteArray payload(8, 0x00);
+    QByteArray payload(8, 0x00);
     payload[1] = static_cast<char>(CanScaling::encodeTemp(coolant));
     payload[3] = static_cast<char>(CanScaling::encodeTemp(oil));
     return QCanBusFrame(CanScaling::kFrameTemp, payload);
@@ -86,7 +91,14 @@ QCanBusFrame MockCanProvider::tempFrame(double coolant, double oil)
 
 QCanBusFrame MockCanProvider::speedFrame(int speed)
 {
-    static QByteArray payload(8, 0x00);
+    QByteArray payload(8, 0x00);
     qToBigEndian<quint16>(CanScaling::encodeSpeed(speed), payload.data());
     return QCanBusFrame(CanScaling::kFrameSpeed, payload);
+}
+
+QCanBusFrame MockCanProvider::gearFrame(int gear)
+{
+    QByteArray payload(8, 0x00);
+    payload[0] = static_cast<char>(CanScaling::encodeGear(gear));
+    return QCanBusFrame(CanScaling::kFrameGear, payload);
 }

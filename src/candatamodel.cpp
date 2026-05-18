@@ -37,6 +37,13 @@ void CanDataModel::onFrame(const QCanBusFrame &frame)
         }
         break;
 
+    case CanScaling::kFrameGear:
+        if (p.size() >= 1) {
+            m_gear  = CanScaling::decodeGear(static_cast<quint8>(p[0]));
+            m_dirty |= kDirtyGear;
+        }
+        break;
+
     default:
         break;
     }
@@ -52,4 +59,5 @@ void CanDataModel::emitNotifications()
     if (dirty & kDirtyRpm)   emit rpmChanged();
     if (dirty & kDirtyTemp) { emit coolantTempChanged(); emit oilTempChanged(); }
     if (dirty & kDirtySpeed) emit speedChanged();
+    if (dirty & kDirtyGear)  emit gearChanged();
 }

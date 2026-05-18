@@ -8,7 +8,7 @@
 
 static QString validatedPosition(const QString &pos, const QString &key)
 {
-    if (pos == "left" || pos == "right" || pos == "bottom")
+    if (pos == "left" || pos == "center" || pos == "right" || pos == "bottom")
         return pos;
     qWarning() << "dashboard.conf: invalid position" << pos << "for" << key << "— defaulting to \"left\"";
     return "left";
@@ -56,12 +56,16 @@ static void writeDefaultConfig(const QString &path)
         "[Gauges]\n"
         "\n"
         "# Visible: true / false\n"
-        "# Position: left | right | bottom\n"
+        "# Position: left | center | right | bottom\n"
+        "\n"
+        "# Gear indicator — shown in the center panel (position is always center)\n"
+        "Gear.Visible = true\n"
+        "\n"
         "RPM.Visible = true\n"
         "RPM.Position = left\n"
         "\n"
         "Speed.Visible = true\n"
-        "Speed.Position = right\n"
+        "Speed.Position = center\n"
         "\n"
         "Coolant.Visible = true\n"
         "Coolant.Position = left\n"
@@ -92,6 +96,7 @@ DashConfig::DashConfig(QObject *parent) : QObject(parent)
     s.endGroup();
 
     s.beginGroup("Gauges");
+    m_gearVisible     = s.value("Gear.Visible",     m_gearVisible).toBool();
     m_rpmVisible      = s.value("RPM.Visible",      m_rpmVisible).toBool();
     m_rpmPosition     = validatedPosition(s.value("RPM.Position",     m_rpmPosition).toString(),     "RPM.Position");
     m_speedVisible    = s.value("Speed.Visible",    m_speedVisible).toBool();
