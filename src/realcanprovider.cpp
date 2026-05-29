@@ -43,8 +43,9 @@ void RealCanProvider::stop()
 
 void RealCanProvider::onFramesReceived()
 {
-    while (m_device->framesAvailable() > 0)
-        emit frameReady(m_device->readFrame());
+    const QList<QCanBusFrame> frames = m_device->readAllFrames();
+    for (const QCanBusFrame &f : frames)
+        emit frameReady(f);
 }
 
 void RealCanProvider::onErrorOccurred(QCanBusDevice::CanBusError error)

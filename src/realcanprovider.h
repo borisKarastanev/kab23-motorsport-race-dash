@@ -12,7 +12,7 @@ public:
     void start() override;
     void stop() override;
 
-private slots:
+private:
     void onFramesReceived();
     void onErrorOccurred(QCanBusDevice::CanBusError error);
 
