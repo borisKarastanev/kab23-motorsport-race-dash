@@ -1,5 +1,6 @@
 #include "candatamodel.h"
 #include "canscaling.h"
+#include <QDebug>
 
 CanDataModel::CanDataModel(QObject *parent)
     : QObject(parent)
@@ -60,4 +61,10 @@ void CanDataModel::emitNotifications()
     if (dirty & kDirtyTemp) { emit coolantTempChanged(); emit oilTempChanged(); }
     if (dirty & kDirtySpeed) emit speedChanged();
     if (dirty & kDirtyGear)  emit gearChanged();
+
+    qDebug() << "RPM:" << m_rpm
+             << "| Coolant:" << m_coolantTemp << "°C"
+             << "| Oil:" << m_oilTemp << "°C"
+             << "| Speed:" << m_speed << "km/h"
+             << "| Gear:" << m_gear;
 }
