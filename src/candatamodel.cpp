@@ -17,24 +17,18 @@ void CanDataModel::onFrame(const QCanBusFrame &frame)
     switch (frame.frameId()) {
 
     case CanScaling::kFrameRpm:
-        if (p.size() >= 4) {
-            m_rpm = CanScaling::decodeRpm(qFromBigEndian<quint16>(p.constData() + 2));
+        if (p.size() >= CanScaling::kOffsetRpm + 2) {
+            m_rpm = CanScaling::decodeRpm(qFromBigEndian<quint16>(p.constData() + CanScaling::kOffsetRpm));
             m_dirty |= kDirtyRpm;
         }
         break;
 
     case CanScaling::kFrameTemp:
-        if (p.size() >= 4) {
-            m_coolantTemp = CanScaling::decodeTemp(static_cast<quint8>(p[1]));
-            m_oilTemp     = CanScaling::decodeTemp(static_cast<quint8>(p[3]));
-            m_dirty |= kDirtyTemp;
-        }
-        break;
-
-    case CanScaling::kFrameSpeed:
-        if (p.size() >= 2) {
-            m_speed = CanScaling::decodeSpeed(qFromBigEndian<quint16>(p.constData()));
-            m_dirty |= kDirtySpeed;
+        if (p.size() >= CanScaling::kOffsetSpeed + 2) {
+            m_coolantTemp = CanScaling::decodeTemp(static_cast<quint8>(p[CanScaling::kOffsetCoolant]));
+            m_oilTemp     = CanScaling::decodeTemp(static_cast<quint8>(p[CanScaling::kOffsetOil]));
+            m_speed       = CanScaling::decodeSpeed(qFromBigEndian<quint16>(p.constData() + CanScaling::kOffsetSpeed));
+            m_dirty |= kDirtyTemp | kDirtySpeed;
         }
         break;
 
