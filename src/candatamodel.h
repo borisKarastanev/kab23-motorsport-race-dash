@@ -35,10 +35,11 @@ private slots:
     void emitNotifications();
 
 private:
-    static constexpr quint8 kDirtyRpm   = 0x01;
-    static constexpr quint8 kDirtyTemp  = 0x02;
-    static constexpr quint8 kDirtySpeed = 0x04;
-    static constexpr quint8 kDirtyGear  = 0x08;
+    static constexpr quint8 kDirtyRpm     = 0x01;
+    static constexpr quint8 kDirtyCoolant = 0x02;
+    static constexpr quint8 kDirtyOilTemp = 0x04;
+    static constexpr quint8 kDirtySpeed  = 0x08;
+    static constexpr quint8 kDirtyGear   = 0x10;
 
     int    m_rpm         = 0;
     double m_coolantTemp = 0.0;

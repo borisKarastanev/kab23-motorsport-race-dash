@@ -69,7 +69,8 @@ void MockCanProvider::onTick()
     const double oilProgress     = std::min(static_cast<double>(m_tick) / OIL_RAMP_TICKS,     1.0);
 
     emit frameReady(rpmFrame(rpm));
-    emit frameReady(tempFrame(20.0 + coolantProgress * 70.0, 20.0 + oilProgress * 90.0, static_cast<int>(speedD)));
+    emit frameReady(tempFrame(20.0 + coolantProgress * 70.0, static_cast<int>(speedD)));
+    emit frameReady(dme4Frame(20.0 + oilProgress * 90.0));
     emit frameReady(gearFrame(gear));
 }
 
@@ -80,13 +81,19 @@ QCanBusFrame MockCanProvider::rpmFrame(int rpm)
     return QCanBusFrame(CanScaling::kFrameRpm, payload);
 }
 
-QCanBusFrame MockCanProvider::tempFrame(double coolant, double oil, int speed)
+QCanBusFrame MockCanProvider::tempFrame(double coolant, int speed)
 {
     QByteArray payload(8, 0x00);
-    payload[CanScaling::kOffsetCoolant] = static_cast<char>(CanScaling::encodeTemp(coolant));
-    payload[CanScaling::kOffsetOil]     = static_cast<char>(CanScaling::encodeTemp(oil));
+    payload[CanScaling::kOffsetCoolant] = static_cast<char>(CanScaling::encodeCoolant(coolant));
     qToBigEndian<quint16>(CanScaling::encodeSpeed(speed), payload.data() + CanScaling::kOffsetSpeed);
     return QCanBusFrame(CanScaling::kFrameTemp, payload);
+}
+
+QCanBusFrame MockCanProvider::dme4Frame(double oilTemp)
+{
+    QByteArray payload(8, 0x00);
+    payload[CanScaling::kOffsetOilTemp] = static_cast<char>(CanScaling::encodeOilTemp(oilTemp));
+    return QCanBusFrame(CanScaling::kFrameDme4, payload);
 }
 
 QCanBusFrame MockCanProvider::gearFrame(int gear)

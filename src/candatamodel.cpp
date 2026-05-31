@@ -24,11 +24,20 @@ void CanDataModel::onFrame(const QCanBusFrame &frame)
         break;
 
     case CanScaling::kFrameTemp:
+        if (p.size() >= CanScaling::kOffsetCoolant + 1) {
+            m_coolantTemp = CanScaling::decodeCoolant(static_cast<quint8>(p[CanScaling::kOffsetCoolant]));
+            m_dirty |= kDirtyCoolant;
+        }
         if (p.size() >= CanScaling::kOffsetSpeed + 2) {
-            m_coolantTemp = CanScaling::decodeTemp(static_cast<quint8>(p[CanScaling::kOffsetCoolant]));
-            m_oilTemp     = CanScaling::decodeTemp(static_cast<quint8>(p[CanScaling::kOffsetOil]));
-            m_speed       = CanScaling::decodeSpeed(qFromBigEndian<quint16>(p.constData() + CanScaling::kOffsetSpeed));
-            m_dirty |= kDirtyTemp | kDirtySpeed;
+            m_speed = CanScaling::decodeSpeed(qFromBigEndian<quint16>(p.constData() + CanScaling::kOffsetSpeed));
+            m_dirty |= kDirtySpeed;
+        }
+        break;
+
+    case CanScaling::kFrameDme4:
+        if (p.size() >= CanScaling::kOffsetOilTemp + 1) {
+            m_oilTemp = CanScaling::decodeOilTemp(static_cast<quint8>(p[CanScaling::kOffsetOilTemp]));
+            m_dirty |= kDirtyOilTemp;
         }
         break;
 
@@ -51,10 +60,11 @@ void CanDataModel::emitNotifications()
     const quint8 dirty = m_dirty;
     m_dirty = 0;
 
-    if (dirty & kDirtyRpm)   emit rpmChanged();
-    if (dirty & kDirtyTemp) { emit coolantTempChanged(); emit oilTempChanged(); }
-    if (dirty & kDirtySpeed) emit speedChanged();
-    if (dirty & kDirtyGear)  emit gearChanged();
+    if (dirty & kDirtyRpm)     emit rpmChanged();
+    if (dirty & kDirtyCoolant) emit coolantTempChanged();
+    if (dirty & kDirtyOilTemp) emit oilTempChanged();
+    if (dirty & kDirtySpeed)   emit speedChanged();
+    if (dirty & kDirtyGear)    emit gearChanged();
 
     qDebug() << "RPM:" << m_rpm
              << "| Coolant:" << m_coolantTemp << "°C"
