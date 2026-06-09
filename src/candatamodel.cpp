@@ -1,6 +1,5 @@
 #include "candatamodel.h"
 #include "canscaling.h"
-#include <QDebug>
 
 CanDataModel::CanDataModel(QObject *parent)
     : QObject(parent)
@@ -28,23 +27,12 @@ void CanDataModel::onFrame(const QCanBusFrame &frame)
             m_coolantTemp = CanScaling::decodeCoolant(static_cast<quint8>(p[CanScaling::kOffsetCoolant]));
             m_dirty |= kDirtyCoolant;
         }
-        if (p.size() >= CanScaling::kOffsetSpeed + 2) {
-            m_speed = CanScaling::decodeSpeed(qFromBigEndian<quint16>(p.constData() + CanScaling::kOffsetSpeed));
-            m_dirty |= kDirtySpeed;
-        }
         break;
 
     case CanScaling::kFrameDme4:
         if (p.size() >= CanScaling::kOffsetOilTemp + 1) {
             m_oilTemp = CanScaling::decodeOilTemp(static_cast<quint8>(p[CanScaling::kOffsetOilTemp]));
             m_dirty |= kDirtyOilTemp;
-        }
-        break;
-
-    case CanScaling::kFrameGear:
-        if (p.size() >= 1) {
-            m_gear  = CanScaling::decodeGear(static_cast<quint8>(p[0]));
-            m_dirty |= kDirtyGear;
         }
         break;
 
@@ -65,10 +53,4 @@ void CanDataModel::emitNotifications()
     if (dirty & kDirtyOilTemp) emit oilTempChanged();
     if (dirty & kDirtySpeed)   emit speedChanged();
     if (dirty & kDirtyGear)    emit gearChanged();
-
-    qDebug() << "RPM:" << m_rpm
-             << "| Coolant:" << m_coolantTemp << "°C"
-             << "| Oil:" << m_oilTemp << "°C"
-             << "| Speed:" << m_speed << "km/h"
-             << "| Gear:" << m_gear;
 }
