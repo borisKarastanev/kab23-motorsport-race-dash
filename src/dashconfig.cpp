@@ -8,7 +8,7 @@
 
 static QString validatedPosition(const QString &pos, const QString &key)
 {
-    if (pos == "left" || pos == "center" || pos == "right" || pos == "bottom")
+    if (pos == "left" || pos == "center" || pos == "right")
         return pos;
     qWarning() << "dashboard.conf: invalid position" << pos << "for" << key << "— defaulting to \"left\"";
     return "left";
@@ -64,14 +64,28 @@ static void writeDefaultConfig(const QString &path)
         "RPM.Visible = true\n"
         "RPM.Position = left\n"
         "\n"
-        "Speed.Visible = false\n"
+        "Speed.Visible = true\n"
         "Speed.Position = center\n"
         "\n"
         "Coolant.Visible = true\n"
         "Coolant.Position = left\n"
         "\n"
         "OilTemp.Visible = true\n"
-        "OilTemp.Position = right\n";
+        "OilTemp.Position = right\n"
+        "\n"
+        "# Lap timer panel (shown in the bottom zone)\n"
+        "LapTimer.Visible = true\n"
+        "\n"
+        "\n"
+        "[RaceBox]\n"
+        "\n"
+        "# BLE device name prefix — must match the start of the RaceBox Mini device name\n"
+        "DeviceName = RaceBox Mini\n"
+        "\n"
+        "# Virtual start/finish line (set to 0.0 / 0.0 to auto-learn on first lap button press)\n"
+        "FinishLine.Latitude  = 0.0\n"
+        "FinishLine.Longitude = 0.0\n"
+        "FinishLine.RadiusM   = 20\n";
 }
 
 DashConfig::DashConfig(QObject *parent) : QObject(parent)
@@ -105,5 +119,13 @@ DashConfig::DashConfig(QObject *parent) : QObject(parent)
     m_coolantPosition = validatedPosition(s.value("Coolant.Position", m_coolantPosition).toString(), "Coolant.Position");
     m_oilTempVisible  = s.value("OilTemp.Visible",  m_oilTempVisible).toBool();
     m_oilTempPosition = validatedPosition(s.value("OilTemp.Position", m_oilTempPosition).toString(), "OilTemp.Position");
+    m_lapTimerVisible = s.value("LapTimer.Visible", m_lapTimerVisible).toBool();
+    s.endGroup();
+
+    s.beginGroup("RaceBox");
+    m_raceBoxDeviceName  = s.value("DeviceName",           m_raceBoxDeviceName).toString();
+    m_finishLineLat      = s.value("FinishLine.Latitude",  m_finishLineLat).toDouble();
+    m_finishLineLon      = s.value("FinishLine.Longitude", m_finishLineLon).toDouble();
+    m_finishLineRadiusM  = s.value("FinishLine.RadiusM",   m_finishLineRadiusM).toDouble();
     s.endGroup();
 }

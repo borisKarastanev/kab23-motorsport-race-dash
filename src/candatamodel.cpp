@@ -41,6 +41,12 @@ void CanDataModel::onFrame(const QCanBusFrame &frame)
     }
 }
 
+void CanDataModel::setSpeed(int kmh)
+{
+    m_speed = kmh;
+    m_dirty |= kDirtySpeed;
+}
+
 void CanDataModel::emitNotifications()
 {
     if (!m_dirty)

@@ -27,6 +27,13 @@ class DashConfig : public QObject {
     Q_PROPERTY(QString coolantPosition READ coolantPosition CONSTANT)
     Q_PROPERTY(bool    oilTempVisible  READ oilTempVisible  CONSTANT)
     Q_PROPERTY(QString oilTempPosition READ oilTempPosition CONSTANT)
+    Q_PROPERTY(bool    lapTimerVisible READ lapTimerVisible CONSTANT)
+
+    // --- RaceBox BLE ---------------------------------------------------------
+    Q_PROPERTY(QString raceBoxDeviceName  READ raceBoxDeviceName  CONSTANT)
+    Q_PROPERTY(double  finishLineLat      READ finishLineLat      CONSTANT)
+    Q_PROPERTY(double  finishLineLon      READ finishLineLon      CONSTANT)
+    Q_PROPERTY(double  finishLineRadiusM  READ finishLineRadiusM  CONSTANT)
 
 public:
     explicit DashConfig(QObject *parent = nullptr);
@@ -48,8 +55,13 @@ public:
     QString speedPosition()   const { return m_speedPosition; }
     bool    coolantVisible()  const { return m_coolantVisible; }
     QString coolantPosition() const { return m_coolantPosition; }
-    bool    oilTempVisible()  const { return m_oilTempVisible; }
-    QString oilTempPosition() const { return m_oilTempPosition; }
+    bool    oilTempVisible()     const { return m_oilTempVisible; }
+    QString oilTempPosition()    const { return m_oilTempPosition; }
+    bool    lapTimerVisible()    const { return m_lapTimerVisible; }
+    QString raceBoxDeviceName()  const { return m_raceBoxDeviceName; }
+    double  finishLineLat()      const { return m_finishLineLat; }
+    double  finishLineLon()      const { return m_finishLineLon; }
+    double  finishLineRadiusM()  const { return m_finishLineRadiusM; }
 
 private:
     int     m_ledCount        = 10;
@@ -65,10 +77,16 @@ private:
     bool    m_gearVisible     = false;
     bool    m_rpmVisible      = true;
     QString m_rpmPosition     = "left";
-    bool    m_speedVisible    = false;
-    QString m_speedPosition   = "center";
-    bool    m_coolantVisible  = true;
-    QString m_coolantPosition = "right";
-    bool    m_oilTempVisible  = true;
-    QString m_oilTempPosition = "right";
+    bool    m_speedVisible      = true;
+    QString m_speedPosition     = "center";
+    bool    m_coolantVisible    = true;
+    QString m_coolantPosition   = "right";
+    bool    m_oilTempVisible    = true;
+    QString m_oilTempPosition   = "right";
+    bool    m_lapTimerVisible   = true;
+
+    QString m_raceBoxDeviceName = "RaceBox Mini";
+    double  m_finishLineLat     = 0.0;
+    double  m_finishLineLon     = 0.0;
+    double  m_finishLineRadiusM = 20.0;
 };

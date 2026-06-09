@@ -8,6 +8,7 @@ set(CMAKE_AUTOMOC ON)
 set(CMAKE_AUTORCC ON)
 
 find_package(Qt6 REQUIRED COMPONENTS Core Quick SerialBus)
+find_package(Qt6 OPTIONAL_COMPONENTS Bluetooth)
 
 qt_add_resources(RESOURCES resources.qrc)
 
@@ -18,6 +19,11 @@ add_executable(bmw-e46-dash
     src/dashconfig.cpp
     src/mockcanprovider.cpp
     src/realcanprovider.cpp
+    src/raceboxdata.h
+    src/iraceprovider.h
+    src/raceboxmodel.cpp
+    src/mockraceboxprovider.cpp
+    src/raceboxprovider.cpp
     ${RESOURCES}
 )
 
@@ -28,3 +34,11 @@ target_link_libraries(bmw-e46-dash
     Qt6::Quick
     Qt6::SerialBus
 )
+
+if(Qt6Bluetooth_FOUND)
+    target_compile_definitions(bmw-e46-dash PRIVATE HAVE_BLUETOOTH)
+    target_link_libraries(bmw-e46-dash Qt6::Bluetooth)
+    message(STATUS "Qt6 Bluetooth found — RaceBoxProvider enabled")
+else()
+    message(STATUS "Qt6 Bluetooth not found — only MockRaceBoxProvider available")
+endif()

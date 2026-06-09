@@ -10,6 +10,7 @@ sudo apt install -y \
     qt6-base-dev \
     qt6-declarative-dev \
     qt6-serialbus-dev \
+    qt6-connectivity-dev \
     can-utils \
     libsocketcan2 \
     xvfb

@@ -5,5 +5,7 @@
         <file>qml/Gauge.qml</file>
         <file>qml/GearIndicator.qml</file>
         <file>qml/LedStrip.qml</file>
+        <file>qml/LapTimer.qml</file>
+        <file>qml/StatusBar.qml</file>
     </qresource>
 </RCC>
