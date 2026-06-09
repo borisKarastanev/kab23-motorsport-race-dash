@@ -62,10 +62,10 @@ private:
     int     m_allBlueRpm      = 6750;
     int     m_limiterRpm      = 6800;
 
-    bool    m_gearVisible     = true;
+    bool    m_gearVisible     = false;
     bool    m_rpmVisible      = true;
     QString m_rpmPosition     = "left";
-    bool    m_speedVisible    = true;
+    bool    m_speedVisible    = false;
     QString m_speedPosition   = "center";
     bool    m_coolantVisible  = true;
     QString m_coolantPosition = "right";

@@ -19,7 +19,6 @@ private:
     quint64 m_tick = 0;
 
     static QCanBusFrame rpmFrame(int rpm);
-    static QCanBusFrame tempFrame(double coolant, double oil);
-    static QCanBusFrame speedFrame(int speed);
-    static QCanBusFrame gearFrame(int gear);
+    static QCanBusFrame tempFrame(double coolant);
+    static QCanBusFrame dme4Frame(double oilTemp);
 };

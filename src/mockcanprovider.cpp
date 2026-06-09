@@ -1,28 +1,13 @@
 #include "mockcanprovider.h"
 #include "canscaling.h"
 #include <algorithm>
+#include <cmath>
 
 namespace {
 
-struct GearData {
-    int    entryRpm;
-    double entrySpeed;
-    double exitSpeed;
-    int    durationTicks; // at 50 Hz
-};
-
-constexpr int SHIFT_RPM = 6800;
-
-constexpr GearData GEARS[5] = {
-    {  650,   0.0,  50.0, 150 },  // G1 — 3.0 s  (cold start from idle)
-    { 5000,  50.0,  90.0, 125 },  // G2 — 2.5 s  (6800 - 1800 drop)
-    { 5000,  90.0, 130.0, 225 },  // G3 — 4.5 s
-    { 5000, 130.0, 175.0, 250 },  // G4 — 5.0 s
-    { 5000, 175.0, 220.0, 400 },  // G5 — 8.0 s
-};
-
-// Sum of all durationTicks — loop restarts after G5
-constexpr int CYCLE_TICKS = 150 + 125 + 225 + 250 + 400; // 1150 = 23.0 s
+constexpr int SHIFT_RPM   = 6800;
+constexpr int IDLE_RPM    =  650;
+constexpr int CYCLE_TICKS = 1150; // 23.0 s at 50 Hz
 
 } // namespace
 
@@ -43,62 +28,35 @@ void MockCanProvider::onTick()
 {
     ++m_tick;
 
-    // --- RPM + Speed: 5-gear acceleration loop ---
-    const int cycleTick = static_cast<int>(m_tick % CYCLE_TICKS);
+    // RPM: sine wave between idle and redline over the cycle period
+    const double phase = (static_cast<double>(m_tick % CYCLE_TICKS) / CYCLE_TICKS) * 2.0 * M_PI;
+    const int rpm = IDLE_RPM + static_cast<int>((SHIFT_RPM - IDLE_RPM) * 0.5 * (1.0 - std::cos(phase)));
 
-    int    rpm    = SHIFT_RPM;
-    double speedD = 220.0;
-    int    gear   = 1;
-
-    int tickStart = 0;
-    int gearIdx   = 0;
-    for (const GearData &g : GEARS) {
-        if (cycleTick < tickStart + g.durationTicks) {
-            const double p = static_cast<double>(cycleTick - tickStart) / g.durationTicks;
-            rpm    = static_cast<int>(g.entryRpm + (SHIFT_RPM - g.entryRpm) * p);
-            speedD = g.entrySpeed + (g.exitSpeed - g.entrySpeed) * p;
-            gear   = gearIdx + 1;
-            break;
-        }
-        tickStart += g.durationTicks;
-        ++gearIdx;
-    }
-
-    // --- Temperature ramps (independent of gear state) ---
     const double coolantProgress = std::min(static_cast<double>(m_tick) / COOLANT_RAMP_TICKS, 1.0);
     const double oilProgress     = std::min(static_cast<double>(m_tick) / OIL_RAMP_TICKS,     1.0);
 
     emit frameReady(rpmFrame(rpm));
-    emit frameReady(tempFrame(20.0 + coolantProgress * 70.0, 20.0 + oilProgress * 90.0));
-    emit frameReady(speedFrame(static_cast<int>(speedD)));
-    emit frameReady(gearFrame(gear));
+    emit frameReady(tempFrame(20.0 + coolantProgress * 70.0));
+    emit frameReady(dme4Frame(20.0 + oilProgress * 90.0));
 }
 
 QCanBusFrame MockCanProvider::rpmFrame(int rpm)
 {
     QByteArray payload(8, 0x00);
-    qToBigEndian<quint16>(CanScaling::encodeRpm(rpm), payload.data() + 2);
+    qToBigEndian<quint16>(CanScaling::encodeRpm(rpm), payload.data() + CanScaling::kOffsetRpm);
     return QCanBusFrame(CanScaling::kFrameRpm, payload);
 }
 
-QCanBusFrame MockCanProvider::tempFrame(double coolant, double oil)
+QCanBusFrame MockCanProvider::tempFrame(double coolant)
 {
     QByteArray payload(8, 0x00);
-    payload[1] = static_cast<char>(CanScaling::encodeTemp(coolant));
-    payload[3] = static_cast<char>(CanScaling::encodeTemp(oil));
+    payload[CanScaling::kOffsetCoolant] = static_cast<char>(CanScaling::encodeCoolant(coolant));
     return QCanBusFrame(CanScaling::kFrameTemp, payload);
 }
 
-QCanBusFrame MockCanProvider::speedFrame(int speed)
+QCanBusFrame MockCanProvider::dme4Frame(double oilTemp)
 {
     QByteArray payload(8, 0x00);
-    qToBigEndian<quint16>(CanScaling::encodeSpeed(speed), payload.data());
-    return QCanBusFrame(CanScaling::kFrameSpeed, payload);
-}
-
-QCanBusFrame MockCanProvider::gearFrame(int gear)
-{
-    QByteArray payload(8, 0x00);
-    payload[0] = static_cast<char>(CanScaling::encodeGear(gear));
-    return QCanBusFrame(CanScaling::kFrameGear, payload);
+    payload[CanScaling::kOffsetOilTemp] = static_cast<char>(CanScaling::encodeOilTemp(oilTemp));
+    return QCanBusFrame(CanScaling::kFrameDme4, payload);
 }

@@ -3,7 +3,7 @@
 #include <QQmlContext>
 #include <QMetaType>
 
-#include "src/mockcanprovider.h"
+#include "src/realcanprovider.h"
 #include "src/candatamodel.h"
 #include "src/dashconfig.h"
 
@@ -14,10 +14,10 @@ int main(int argc, char *argv[])
 
     DashConfig dashConfig;
     CanDataModel dataModel;
-    MockCanProvider provider;
+    RealCanProvider provider;
 
     // QueuedConnection ensures cross-thread safety when provider moves to a worker thread
-    QObject::connect(&provider, &MockCanProvider::frameReady,
+    QObject::connect(&provider, &RealCanProvider::frameReady,
                      &dataModel, &CanDataModel::onFrame,
                      Qt::QueuedConnection);
 
