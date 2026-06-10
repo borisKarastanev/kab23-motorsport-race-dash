@@ -2,8 +2,9 @@
 set -e
 
 REPO_DIR="$(cd "$(dirname "$0")" && pwd)"
-SERVICE_NAME="can0.service"
-APP_BINARY="$REPO_DIR/build/bmw-e46-dash"
+DASHBOARD_USER="${SUDO_USER:-$(whoami)}"
+CAN_SERVICE="can0.service"
+DASH_SERVICE="bmw-e46-dash.service"
 
 echo "=== Installing dependencies ==="
 sudo apt install -y \
@@ -13,7 +14,8 @@ sudo apt install -y \
     qt6-connectivity-dev \
     can-utils \
     libsocketcan2 \
-    xvfb
+    libegl-mesa0 \
+    libgl1-mesa-dri
 
 echo "=== Building application ==="
 mkdir -p "$REPO_DIR/build"
@@ -21,13 +23,24 @@ cd "$REPO_DIR/build"
 cmake .. -DCMAKE_BUILD_TYPE=Release
 make -j$(nproc)
 
-echo "=== Installing systemd CAN service ==="
-sudo cp "$REPO_DIR/systemd/$SERVICE_NAME" /etc/systemd/system/
-sudo systemctl daemon-reload
-sudo systemctl enable "$SERVICE_NAME"
+echo "=== Installing systemd services ==="
+# CAN interface service (unmodified)
+sudo cp "$REPO_DIR/systemd/$CAN_SERVICE" /etc/systemd/system/
 
+# Dashboard service — substitute install path and user
+sed "s|@INSTALL_DIR@|$REPO_DIR|g; s|@DASHBOARD_USER@|$DASHBOARD_USER|g" \
+    "$REPO_DIR/systemd/$DASH_SERVICE" \
+    | sudo tee /etc/systemd/system/$DASH_SERVICE > /dev/null
+
+sudo systemctl daemon-reload
+sudo systemctl enable "$CAN_SERVICE"
+sudo systemctl enable "$DASH_SERVICE"
+
+echo ""
 echo "=== Done ==="
-echo "Plug in the USB2CANFD adapter and reboot, or run:"
-echo "  sudo systemctl start $SERVICE_NAME"
-echo "Then launch the dashboard with:"
-echo "  DISPLAY= $APP_BINARY -platform offscreen"
+echo "User: $DASHBOARD_USER"
+echo "Install dir: $REPO_DIR"
+echo ""
+echo "Reboot to start the dashboard automatically, or run:"
+echo "  sudo systemctl start $CAN_SERVICE"
+echo "  sudo systemctl start $DASH_SERVICE"

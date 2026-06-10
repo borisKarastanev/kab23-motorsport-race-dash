@@ -3,6 +3,7 @@
 #include <QQmlContext>
 #include <QMetaType>
 #include <QCommandLineParser>
+#include <QCursor>
 
 #include "src/realcanprovider.h"
 #include "src/mockcanprovider.h"
@@ -25,6 +26,9 @@ int main(int argc, char *argv[])
     parser.addOption({"mock", "Use mock providers (no hardware required)"});
     parser.process(app);
     const bool useMock = parser.isSet("mock");
+
+    if (!useMock)
+        QGuiApplication::setOverrideCursor(QCursor(Qt::BlankCursor));
 
     DashConfig    dashConfig;
     CanDataModel  dataModel;
