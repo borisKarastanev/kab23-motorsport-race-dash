@@ -5,7 +5,7 @@ import QtQuick.Layouts 1.15
 Window {
     width: 800
     height: 480
-    visibility: Window.FullScreen
+    visibility: kioskMode ? Window.FullScreen : Window.AutomaticVisibility
     visible: true
     title: "BMW E46 Dashboard"
     color: "#0a0a0a"

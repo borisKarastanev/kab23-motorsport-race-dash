@@ -23,11 +23,13 @@ int main(int argc, char *argv[])
     qRegisterMetaType<RaceBoxData>("RaceBoxData");
 
     QCommandLineParser parser;
-    parser.addOption({"mock", "Use mock providers (no hardware required)"});
+    parser.addOption({"mock",  "Use mock providers (no hardware required)"});
+    parser.addOption({"kiosk", "Fullscreen kiosk mode: hide cursor, fill display"});
     parser.process(app);
-    const bool useMock = parser.isSet("mock");
+    const bool useMock   = parser.isSet("mock");
+    const bool kioskMode = parser.isSet("kiosk");
 
-    if (!useMock)
+    if (kioskMode)
         QGuiApplication::setOverrideCursor(QCursor(Qt::BlankCursor));
 
     DashConfig    dashConfig;
@@ -76,6 +78,7 @@ int main(int argc, char *argv[])
     engine.rootContext()->setContextProperty("dashConfig",   &dashConfig);
     engine.rootContext()->setContextProperty("dataModel",    &dataModel);
     engine.rootContext()->setContextProperty("raceBoxModel", &raceBoxModel);
+    engine.rootContext()->setContextProperty("kioskMode",    kioskMode);
     engine.load(QUrl(QStringLiteral("qrc:/qml/main.qml")));
 
     if (engine.rootObjects().isEmpty())
