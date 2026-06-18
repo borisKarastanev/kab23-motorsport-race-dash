@@ -26,6 +26,28 @@ chown -R "$DASHBOARD_USER:$DASHBOARD_USER" "$REPO_DIR/build"
 # tree via configure_file, which fails when running as root.
 sudo -u "$DASHBOARD_USER" bash -c "cd '$REPO_DIR/build' && cmake .. -DCMAKE_BUILD_TYPE=Release && make -j\$(nproc)"
 
+echo "=== Enabling Bluetooth adapter ==="
+# Unblock now so the rest of the script can use BT immediately
+rfkill unblock bluetooth || true
+# Persistent: one-shot service that unblocks BT before bluetoothd and the dashboard
+sudo tee /etc/systemd/system/bluetooth-unblock.service > /dev/null << 'SVCEOF'
+[Unit]
+Description=Unblock Bluetooth adapter (rfkill)
+Before=bluetooth.service
+DefaultDependencies=no
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/rfkill unblock bluetooth
+RemainAfterExit=yes
+
+[Install]
+WantedBy=sysinit.target
+SVCEOF
+sudo systemctl daemon-reload
+sudo systemctl enable bluetooth-unblock.service
+sudo systemctl start bluetooth-unblock.service || true
+
 echo "=== Installing systemd CAN service ==="
 sudo cp "$REPO_DIR/systemd/$CAN_SERVICE" /etc/systemd/system/
 sudo systemctl daemon-reload

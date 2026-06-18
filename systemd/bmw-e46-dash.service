@@ -1,6 +1,6 @@
 [Unit]
 Description=BMW E46 Race Dashboard
-After=can0.service
+After=can0.service bluetooth.service bluetooth-unblock.service
 Wants=can0.service
 
 [Service]
