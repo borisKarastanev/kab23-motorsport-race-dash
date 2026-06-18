@@ -27,26 +27,19 @@ chown -R "$DASHBOARD_USER:$DASHBOARD_USER" "$REPO_DIR/build"
 sudo -u "$DASHBOARD_USER" bash -c "cd '$REPO_DIR/build' && cmake .. -DCMAKE_BUILD_TYPE=Release && make -j\$(nproc)"
 
 echo "=== Enabling Bluetooth adapter ==="
-# Unblock now so the rest of the script can use BT immediately
 rfkill unblock bluetooth || true
-# Persistent: one-shot service that unblocks BT before bluetoothd and the dashboard
-sudo tee /etc/systemd/system/bluetooth-unblock.service > /dev/null << 'SVCEOF'
-[Unit]
-Description=Unblock Bluetooth adapter (rfkill)
-Before=bluetooth.service
-DefaultDependencies=no
-
+# Drop-in for bluetooth.service: unblock rfkill just before bluetoothd starts.
+# More reliable than a standalone service — runs at exactly the right time.
+sudo mkdir -p /etc/systemd/system/bluetooth.service.d
+sudo tee /etc/systemd/system/bluetooth.service.d/unblock-rfkill.conf > /dev/null << 'DROPIN'
 [Service]
-Type=oneshot
-ExecStart=/usr/bin/rfkill unblock bluetooth
-RemainAfterExit=yes
-
-[Install]
-WantedBy=sysinit.target
-SVCEOF
+ExecStartPre=-/usr/sbin/rfkill unblock bluetooth
+DROPIN
+# Remove the old standalone service if present from a previous install
+sudo systemctl disable bluetooth-unblock.service 2>/dev/null || true
+sudo rm -f /etc/systemd/system/bluetooth-unblock.service
 sudo systemctl daemon-reload
-sudo systemctl enable bluetooth-unblock.service
-sudo systemctl start bluetooth-unblock.service || true
+sudo systemctl restart bluetooth.service || true
 
 echo "=== Installing systemd CAN service ==="
 sudo cp "$REPO_DIR/systemd/$CAN_SERVICE" /etc/systemd/system/
