@@ -17,8 +17,9 @@ class RaceBoxModel : public QObject {
     Q_PROPERTY(double  gForceX        READ gForceX        NOTIFY gForceXChanged)
     Q_PROPERTY(double  gForceY        READ gForceY        NOTIFY gForceYChanged)
     Q_PROPERTY(double  gForceZ        READ gForceZ        NOTIFY gForceZChanged)
-    Q_PROPERTY(int     batteryPercent READ batteryPercent NOTIFY batteryPercentChanged)
-    Q_PROPERTY(bool    finishLineSet  READ finishLineSet  NOTIFY finishLineSetChanged)
+    Q_PROPERTY(int     batteryPercent  READ batteryPercent  NOTIFY batteryPercentChanged)
+    Q_PROPERTY(bool    batteryCharging READ batteryCharging NOTIFY batteryChargingChanged)
+    Q_PROPERTY(bool    finishLineSet   READ finishLineSet   NOTIFY finishLineSetChanged)
 
 public:
     explicit RaceBoxModel(QObject *parent = nullptr);
@@ -33,8 +34,9 @@ public:
     double gForceX()        const { return m_gForceX; }
     double gForceY()        const { return m_gForceY; }
     double gForceZ()        const { return m_gForceZ; }
-    int    batteryPercent() const { return m_batteryPercent; }
-    bool   finishLineSet()  const { return m_finishLineSet; }
+    int    batteryPercent()  const { return m_batteryPercent; }
+    bool   batteryCharging() const { return m_batteryCharging; }
+    bool   finishLineSet()   const { return m_finishLineSet; }
 
     // Called from main.cpp to pass dashconfig finish line values at startup
     void setFinishLine(double lat, double lon, double radiusM);
@@ -57,6 +59,7 @@ signals:
     void gForceYChanged();
     void gForceZChanged();
     void batteryPercentChanged();
+    void batteryChargingChanged();
     void finishLineSetChanged();
     // Emitted to feed CanDataModel
     void speedKmhChanged(int kmh);
@@ -92,11 +95,12 @@ private:
     double m_lastLon = 0.0;
 
     // Motion
-    int    m_speedKmh    = 0;
-    double m_gForceX     = 0.0;
-    double m_gForceY     = 0.0;
-    double m_gForceZ     = 0.0;
-    int    m_batteryPercent = 0;
+    int    m_speedKmh       = 0;
+    double m_gForceX        = 0.0;
+    double m_gForceY        = 0.0;
+    double m_gForceZ        = 0.0;
+    int    m_batteryPercent  = 0;
+    bool   m_batteryCharging = false;
 
     // Dirty bits
     static constexpr quint16 kDirtyConnected   = 0x001;
@@ -109,6 +113,7 @@ private:
     static constexpr quint16 kDirtyGForce      = 0x080;
     static constexpr quint16 kDirtyBattery     = 0x100;
     static constexpr quint16 kDirtyFinishLine  = 0x200;
+    static constexpr quint16 kDirtyCharging    = 0x400;
     quint16 m_dirty = 0;
 
     QTimer m_notifyTimer;

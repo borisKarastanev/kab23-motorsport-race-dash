@@ -59,8 +59,10 @@ void RaceBoxModel::onData(const RaceBoxData &d)
         m_dirty |= kDirtyGForce;
     }
 
-    const int batt = d.batteryRaw & 0x7F;
-    if (m_batteryPercent != batt) { m_batteryPercent = batt; m_dirty |= kDirtyBattery; }
+    const int  batt     = d.batteryRaw & 0x7F;
+    const bool charging = (d.batteryRaw & 0x80) != 0;
+    if (m_batteryPercent  != batt)     { m_batteryPercent  = batt;     m_dirty |= kDirtyBattery; }
+    if (m_batteryCharging != charging) { m_batteryCharging = charging; m_dirty |= kDirtyCharging; }
 
     const int kmhInt = static_cast<int>(d.speedMmS / kMmSPerKmh);
     if (kmhInt != m_speedKmh) { m_speedKmh = kmhInt; emit speedKmhChanged(kmhInt); }
@@ -141,5 +143,6 @@ void RaceBoxModel::emitNotifications()
     if (dirty & kDirtyBestLap)    emit bestLapMsChanged();
     if (dirty & kDirtyGForce)     { emit gForceXChanged(); emit gForceYChanged(); emit gForceZChanged(); }
     if (dirty & kDirtyBattery)    emit batteryPercentChanged();
+    if (dirty & kDirtyCharging)   emit batteryChargingChanged();
     if (dirty & kDirtyFinishLine) emit finishLineSetChanged();
 }
