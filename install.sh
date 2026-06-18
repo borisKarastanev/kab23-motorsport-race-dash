@@ -15,6 +15,7 @@ sudo apt install -y \
     qt6-connectivity-dev \
     can-utils \
     libsocketcan2 \
+    libxkbcommon-dev \
     libegl-mesa0 \
     libgl1-mesa-dri
 
@@ -28,6 +29,8 @@ echo "=== Installing systemd CAN service ==="
 sudo cp "$REPO_DIR/systemd/$CAN_SERVICE" /etc/systemd/system/
 sudo systemctl daemon-reload
 sudo systemctl enable "$CAN_SERVICE"
+# Note: 'non-existent unit dev-ttyACM0.device' warning above is expected —
+# that unit is created by udev only when the USB2CAN adapter is plugged in.
 
 echo "=== Installing dashboard system service (console/eglfs mode) ==="
 sed "s|@INSTALL_DIR@|$REPO_DIR|g; s|@DASHBOARD_USER@|$DASHBOARD_USER|g" \
