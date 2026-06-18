@@ -63,14 +63,18 @@ Rectangle {
             spacing: 4
             visible: raceBoxModel.connected
             Text {
-                text: "\u{1F50B}"  // 🔋
+                text: raceBoxModel.batteryCharging ? "⚡" : "\u{1F50B}"
                 font.pixelSize: 12
                 anchors.verticalCenter: parent.verticalCenter
-                color: raceBoxModel.batteryPercent > 20 ? "#448844" : "#cc4444"
+                color: raceBoxModel.batteryCharging ? "#4488cc"
+                     : raceBoxModel.batteryPercent > 20 ? "#448844" : "#cc4444"
             }
             Text {
-                text: raceBoxModel.batteryPercent + "%"
-                color: raceBoxModel.batteryPercent > 20 ? "#448844" : "#cc4444"
+                text: raceBoxModel.batteryCharging
+                      ? raceBoxModel.batteryPercent + "% ⚡"
+                      : raceBoxModel.batteryPercent + "%"
+                color: raceBoxModel.batteryCharging ? "#4488cc"
+                     : raceBoxModel.batteryPercent > 20 ? "#448844" : "#cc4444"
                 font.pixelSize: 11
                 font.family: "monospace"
                 anchors.verticalCenter: parent.verticalCenter
