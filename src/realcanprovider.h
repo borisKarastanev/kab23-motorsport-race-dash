@@ -17,5 +17,6 @@ private:
     void onErrorOccurred(QCanBusDevice::CanBusError error);
 
 private:
-    QCanBusDevice *m_device = nullptr;
+    QCanBusDevice *m_device           = nullptr;
+    bool           m_firstFrameLogged = false;
 };

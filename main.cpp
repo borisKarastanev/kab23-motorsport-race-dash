@@ -11,6 +11,7 @@
 #include "src/dashconfig.h"
 #include "src/raceboxmodel.h"
 #include "src/mockraceboxprovider.h"
+#include "src/logging.h"
 
 #ifdef HAVE_BLUETOOTH
 #include "src/raceboxprovider.h"
@@ -29,6 +30,10 @@ int main(int argc, char *argv[])
     const bool useMock   = parser.isSet("mock");
     const bool kioskMode = parser.isSet("kiosk");
 
+    qCInfo(lcApp) << "Starting —"
+                  << (useMock ? "mock" : "real") << "providers,"
+                  << (kioskMode ? "kiosk" : "windowed") << "mode";
+
     if (kioskMode)
         QGuiApplication::setOverrideCursor(QCursor(Qt::BlankCursor));
 
@@ -40,10 +45,17 @@ int main(int argc, char *argv[])
         double flLat, flLon, flRadius;
         MockRaceBoxProvider::defaultFinishLine(flLat, flLon, flRadius);
         raceBoxModel.setFinishLine(flLat, flLon, flRadius);
-    } else
+        qCInfo(lcApp) << "Mock finish line loaded";
+    } else {
         raceBoxModel.setFinishLine(dashConfig.finishLineLat(),
                                    dashConfig.finishLineLon(),
                                    dashConfig.finishLineRadiusM());
+        if (dashConfig.finishLineLat() != 0.0 || dashConfig.finishLineLon() != 0.0)
+            qCInfo(lcApp) << "Finish line loaded from config:"
+                          << dashConfig.finishLineLat() << dashConfig.finishLineLon();
+        else
+            qCInfo(lcApp) << "No finish line in config — tap SET FINISH LINE on track";
+    }
 
     // CAN provider
     std::unique_ptr<ICanProvider> canProvider;

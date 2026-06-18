@@ -1,6 +1,6 @@
 #include "realcanprovider.h"
+#include "logging.h"
 #include <QCanBus>
-#include <QDebug>
 
 static constexpr char kPlugin[]    = "socketcan";
 static constexpr char kInterface[] = "can0";
@@ -18,7 +18,7 @@ void RealCanProvider::start()
     QString errorString;
     m_device = QCanBus::instance()->createDevice(kPlugin, kInterface, &errorString);
     if (!m_device) {
-        qWarning() << "RealCanProvider: failed to create device:" << errorString;
+        qCWarning(lcCan) << "Failed to create SocketCAN device:" << errorString;
         return;
     }
 
@@ -26,16 +26,20 @@ void RealCanProvider::start()
     connect(m_device, &QCanBusDevice::errorOccurred,  this, &RealCanProvider::onErrorOccurred);
 
     if (!m_device->connectDevice()) {
-        qWarning() << "RealCanProvider: failed to connect:" << m_device->errorString();
+        qCWarning(lcCan) << "Failed to connect to" << kInterface << "—" << m_device->errorString();
         delete m_device;
         m_device = nullptr;
+        return;
     }
+
+    qCInfo(lcCan) << "Connected to" << kInterface;
 }
 
 void RealCanProvider::stop()
 {
     if (m_device) {
         m_device->disconnectDevice();
+        qCInfo(lcCan) << "Disconnected from" << kInterface;
         delete m_device;
         m_device = nullptr;
     }
@@ -44,11 +48,15 @@ void RealCanProvider::stop()
 void RealCanProvider::onFramesReceived()
 {
     const QList<QCanBusFrame> frames = m_device->readAllFrames();
+    if (!m_firstFrameLogged && !frames.isEmpty()) {
+        qCInfo(lcCan) << "First frame received — CAN bus active";
+        m_firstFrameLogged = true;
+    }
     for (const QCanBusFrame &f : frames)
         emit frameReady(f);
 }
 
 void RealCanProvider::onErrorOccurred(QCanBusDevice::CanBusError error)
 {
-    qWarning() << "RealCanProvider: CAN error:" << error << m_device->errorString();
+    qCWarning(lcCan) << "CAN error" << error << "—" << m_device->errorString();
 }

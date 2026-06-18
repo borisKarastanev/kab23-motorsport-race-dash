@@ -41,6 +41,22 @@ sudo rm -f /etc/systemd/system/bluetooth-unblock.service
 sudo systemctl daemon-reload
 sudo systemctl restart bluetooth.service || true
 
+echo "=== Enabling persistent journald logging ==="
+# By default Raspberry Pi OS uses volatile storage (/run/log/journal) — logs
+# are lost on power-off. Creating /var/log/journal makes journald switch to
+# persistent mode (Storage=auto picks it up without editing journald.conf).
+sudo mkdir -p /var/log/journal
+sudo systemd-tmpfiles --create --prefix /var/log/journal
+# Cap total log size so it doesn't fill the SD card over time.
+JOURNALD_CONF=/etc/systemd/journald.conf.d/dashboard.conf
+sudo mkdir -p /etc/systemd/journald.conf.d
+sudo tee "$JOURNALD_CONF" > /dev/null << 'JOURNALD'
+[Journal]
+SystemMaxUse=100M
+MaxRetentionSec=2week
+JOURNALD
+sudo systemctl restart systemd-journald
+
 echo "=== Installing systemd CAN service ==="
 sudo cp "$REPO_DIR/systemd/$CAN_SERVICE" /etc/systemd/system/
 sudo systemctl daemon-reload
@@ -77,3 +93,7 @@ echo "Console/CLI mode:              systemd service uses eglfs."
 echo ""
 echo "To start manually now:"
 echo "  $REPO_DIR/build/bmw-e46-dash --kiosk"
+echo ""
+echo "To view dashboard logs (persisted across reboots):"
+echo "  journalctl -u bmw-e46-dash"
+echo "  journalctl -u bmw-e46-dash --since '2025-06-18 22:00'"
