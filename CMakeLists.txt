@@ -14,6 +14,7 @@ qt_add_resources(RESOURCES resources.qrc)
 
 add_executable(bmw-e46-dash
     main.cpp
+    src/logging.cpp
     src/icanprovider.h
     src/candatamodel.cpp
     src/dashconfig.cpp

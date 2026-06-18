@@ -1,4 +1,5 @@
 #include "raceboxmodel.h"
+#include "logging.h"
 #include <cmath>
 
 static constexpr double kEarthRadiusM = 6371000.0;
@@ -31,6 +32,7 @@ void RaceBoxModel::learnFinishLineHere()
 {
     if (!m_hasFix) return;
     setFinishLine(m_lastLat, m_lastLon, m_finishRadiusM);
+    qCInfo(lcRaceBox) << "Finish line set at" << m_lastLat << m_lastLon;
     emit finishLineLearned(m_lastLat, m_lastLon);
 }
 
@@ -48,7 +50,14 @@ void RaceBoxModel::onConnectionStateChanged(bool connected)
 void RaceBoxModel::onData(const RaceBoxData &d)
 {
     const bool fix = (d.fixStatus >= 2) && (d.fixFlags & 0x01);
-    if (m_hasFix != fix) { m_hasFix = fix; m_dirty |= kDirtyFix; }
+    if (m_hasFix != fix) {
+        m_hasFix = fix;
+        m_dirty |= kDirtyFix;
+        if (fix)
+            qCInfo(lcRaceBox) << "GPS fix acquired — SVs:" << d.numSvs;
+        else
+            qCInfo(lcRaceBox) << "GPS fix lost";
+    }
 
     if (m_satellites != d.numSvs) { m_satellites = d.numSvs; m_dirty |= kDirtySvs; }
 
@@ -101,10 +110,15 @@ void RaceBoxModel::updateLapTiming(double lat, double lon, double speedKmh)
             const qint64 lapMs = m_lapTimer.elapsed();
             m_lastLapMs = lapMs;
             m_dirty |= kDirtyLastLap;
-            if (m_bestLapMs == 0 || lapMs < m_bestLapMs) {
+            const bool newBest = (m_bestLapMs == 0 || lapMs < m_bestLapMs);
+            if (newBest) {
                 m_bestLapMs = lapMs;
                 m_dirty |= kDirtyBestLap;
             }
+            qCInfo(lcRaceBox) << "Lap" << m_lapNumber << "completed:"
+                              << lapMs / 60000 << "m"
+                              << (lapMs % 60000) / 1000.0 << "s"
+                              << (newBest ? "(new best)" : "");
         }
         ++m_lapNumber;
         m_dirty |= kDirtyLapNumber;

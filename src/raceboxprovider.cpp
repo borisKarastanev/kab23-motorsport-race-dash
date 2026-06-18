@@ -1,6 +1,7 @@
 #ifdef HAVE_BLUETOOTH
 
 #include "raceboxprovider.h"
+#include "logging.h"
 #include <QtEndian>
 #include <QTimer>
 
@@ -40,6 +41,7 @@ void RaceBoxProvider::start()
             this, &RaceBoxProvider::onScanFinished);
     connect(m_scanner, &QBluetoothDeviceDiscoveryAgent::errorOccurred,
             this, &RaceBoxProvider::onScanError);
+    qCInfo(lcRaceBox) << "Scanning for" << m_deviceNamePrefix;
     m_scanner->start(QBluetoothDeviceDiscoveryAgent::LowEnergyMethod);
 }
 
@@ -53,6 +55,7 @@ void RaceBoxProvider::onDeviceDiscovered(const QBluetoothDeviceInfo &info)
 {
     if (!info.name().startsWith(m_deviceNamePrefix))
         return;
+    qCInfo(lcRaceBox) << "Found" << info.name() << "— connecting";
     m_scanner->stop();
     connectToDevice(info);
 }
@@ -65,9 +68,10 @@ void RaceBoxProvider::onScanFinished()
         });
 }
 
-void RaceBoxProvider::onScanError(QBluetoothDeviceDiscoveryAgent::Error)
+void RaceBoxProvider::onScanError(QBluetoothDeviceDiscoveryAgent::Error err)
 {
     // Adapter may not be ready at boot (race with bluetoothd startup) — retry after delay
+    qCWarning(lcRaceBox) << "Scan error" << err << "— retrying in 5 s";
     if (!m_ctrl)
         QTimer::singleShot(5000, this, [this]() {
             if (!m_ctrl) m_scanner->start(QBluetoothDeviceDiscoveryAgent::LowEnergyMethod);
@@ -88,12 +92,14 @@ void RaceBoxProvider::connectToDevice(const QBluetoothDeviceInfo &info)
 
 void RaceBoxProvider::onConnected()
 {
+    qCInfo(lcRaceBox) << "Connected — discovering services";
     emit connectionStateChanged(true);
     m_ctrl->discoverServices();
 }
 
 void RaceBoxProvider::onDisconnected()
 {
+    qCInfo(lcRaceBox) << "Disconnected — reconnecting in 5 s";
     emit connectionStateChanged(false);
 
     if (m_service) { m_service->deleteLater(); m_service = nullptr; }
@@ -111,6 +117,7 @@ void RaceBoxProvider::onDisconnected()
 void RaceBoxProvider::onAllServicesDiscovered()
 {
     if (!m_ctrl->services().contains(kUartServiceUuid)) {
+        qCWarning(lcRaceBox) << "UART service not found on device — disconnecting";
         m_ctrl->disconnectFromDevice();
         return;
     }
@@ -131,13 +138,20 @@ void RaceBoxProvider::onServiceStateChanged(QLowEnergyService::ServiceState stat
         return;
 
     const QLowEnergyCharacteristic txChar = m_service->characteristic(kTxCharUuid);
-    if (!txChar.isValid())
+    if (!txChar.isValid()) {
+        qCWarning(lcRaceBox) << "TX characteristic not found";
         return;
+    }
 
     const QLowEnergyDescriptor cccd = txChar.descriptor(
         QBluetoothUuid::DescriptorType::ClientCharacteristicConfiguration);
-    if (cccd.isValid())
-        m_service->writeDescriptor(cccd, QByteArray::fromHex("0100"));
+    if (!cccd.isValid()) {
+        qCWarning(lcRaceBox) << "CCCD not found — notifications unavailable";
+        return;
+    }
+
+    qCInfo(lcRaceBox) << "TX notifications enabled";
+    m_service->writeDescriptor(cccd, QByteArray::fromHex("0100"));
 }
 
 void RaceBoxProvider::onCharacteristicChanged(const QLowEnergyCharacteristic &c,
