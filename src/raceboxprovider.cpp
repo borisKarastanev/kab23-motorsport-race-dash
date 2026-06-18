@@ -2,6 +2,7 @@
 
 #include "raceboxprovider.h"
 #include <QtEndian>
+#include <QTimer>
 
 // Nordic UART service
 const QBluetoothUuid RaceBoxProvider::kUartServiceUuid{
@@ -38,6 +39,8 @@ void RaceBoxProvider::start()
             this, &RaceBoxProvider::onDeviceDiscovered);
     connect(m_scanner, &QBluetoothDeviceDiscoveryAgent::finished,
             this, &RaceBoxProvider::onDiscoveryFinished);
+    connect(m_scanner, &QBluetoothDeviceDiscoveryAgent::errorOccurred,
+            this, &RaceBoxProvider::onScanError);
     m_scanner->start(QBluetoothDeviceDiscoveryAgent::LowEnergyMethod);
 }
 
@@ -57,9 +60,20 @@ void RaceBoxProvider::onDeviceDiscovered(const QBluetoothDeviceInfo &info)
 
 void RaceBoxProvider::onDiscoveryFinished()
 {
-    // Restart scan if we never found the device
+    // Brief pause before restarting — some BlueZ versions reject immediate restarts
     if (!m_ctrl)
-        m_scanner->start(QBluetoothDeviceDiscoveryAgent::LowEnergyMethod);
+        QTimer::singleShot(2000, this, [this]() {
+            if (!m_ctrl) m_scanner->start(QBluetoothDeviceDiscoveryAgent::LowEnergyMethod);
+        });
+}
+
+void RaceBoxProvider::onScanError(QBluetoothDeviceDiscoveryAgent::Error)
+{
+    // Adapter may not be ready at boot (race with bluetoothd startup) — retry after delay
+    if (!m_ctrl)
+        QTimer::singleShot(5000, this, [this]() {
+            if (!m_ctrl) m_scanner->start(QBluetoothDeviceDiscoveryAgent::LowEnergyMethod);
+        });
 }
 
 void RaceBoxProvider::connectToDevice(const QBluetoothDeviceInfo &info)

@@ -21,6 +21,7 @@ public:
 private slots:
     void onDeviceDiscovered(const QBluetoothDeviceInfo &info);
     void onDiscoveryFinished();
+    void onScanError(QBluetoothDeviceDiscoveryAgent::Error error);
     void onConnected();
     void onDisconnected();
     void onServiceDiscovered(const QBluetoothUuid &uuid);

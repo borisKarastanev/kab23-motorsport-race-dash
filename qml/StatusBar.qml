@@ -19,11 +19,17 @@ Rectangle {
                 width: 8; height: 8
                 radius: 4
                 anchors.verticalCenter: parent.verticalCenter
-                color: raceBoxModel.connected ? "#00cc44" : "#444444"
+                color: raceBoxModel.connected ? "#00cc44" : "#cc8800"
+                SequentialAnimation on opacity {
+                    running: !raceBoxModel.connected
+                    loops: Animation.Infinite
+                    NumberAnimation { to: 0.25; duration: 800; easing.type: Easing.InOutSine }
+                    NumberAnimation { to: 1.0;  duration: 800; easing.type: Easing.InOutSine }
+                }
             }
             Text {
-                text: raceBoxModel.connected ? "RACEBOX" : "NO DEVICE"
-                color: raceBoxModel.connected ? "#448844" : "#444444"
+                text: raceBoxModel.connected ? "RACEBOX" : "SCANNING..."
+                color: raceBoxModel.connected ? "#448844" : "#886600"
                 font.pixelSize: 11
                 font.letterSpacing: 1
                 font.family: "monospace"
