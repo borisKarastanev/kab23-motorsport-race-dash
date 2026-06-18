@@ -73,6 +73,8 @@ int main(int argc, char *argv[])
                      Qt::QueuedConnection);
     QObject::connect(&raceBoxModel, &RaceBoxModel::speedKmhChanged,
                      &dataModel, &CanDataModel::setSpeed);
+    QObject::connect(&raceBoxModel, &RaceBoxModel::finishLineLearned,
+                     &dashConfig, &DashConfig::saveFinishLine);
 
     QQmlApplicationEngine engine;
     engine.rootContext()->setContextProperty("dashConfig",   &dashConfig);

@@ -31,6 +31,7 @@ void RaceBoxModel::learnFinishLineHere()
 {
     if (!m_hasFix) return;
     setFinishLine(m_lastLat, m_lastLon, m_finishRadiusM);
+    emit finishLineLearned(m_lastLat, m_lastLon);
 }
 
 void RaceBoxModel::onConnectionStateChanged(bool connected)
