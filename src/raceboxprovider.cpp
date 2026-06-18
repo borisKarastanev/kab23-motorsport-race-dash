@@ -106,15 +106,19 @@ void RaceBoxProvider::onConnected()
 
 void RaceBoxProvider::onDisconnected()
 {
-    qDebug() << "[RaceBox] Disconnected — restarting scan";
+    qDebug() << "[RaceBox] Disconnected — waiting 5 s for BlueZ cleanup before reconnect";
     emit connectionStateChanged(false);
 
     if (m_service) { m_service->deleteLater(); m_service = nullptr; }
     if (m_ctrl)    { m_ctrl->deleteLater();    m_ctrl    = nullptr; }
     m_buffer.clear();
 
-    if (m_scanner)
-        m_scanner->start(QBluetoothDeviceDiscoveryAgent::LowEnergyMethod);
+    // Immediate reconnect reuses stale D-Bus GATT objects and causes InvalidService.
+    // 5 seconds gives BlueZ time to fully tear down the previous connection.
+    QTimer::singleShot(5000, this, [this]() {
+        if (!m_ctrl && m_scanner)
+            m_scanner->start(QBluetoothDeviceDiscoveryAgent::LowEnergyMethod);
+    });
 }
 
 // Called once the controller has finished enumerating ALL services.
@@ -139,7 +143,14 @@ void RaceBoxProvider::onAllServicesDiscovered()
             this, [](QLowEnergyService::ServiceError err) {
                 qDebug() << "[RaceBox] Service error:" << err;
             });
-    m_service->discoverDetails();
+    connect(m_service, &QLowEnergyService::descriptorWritten,
+            this, [](const QLowEnergyDescriptor &d, const QByteArray &val) {
+                qDebug() << "[RaceBox] Descriptor written:" << d.uuid() << val.toHex();
+            });
+    // SkipValueDiscovery: finds characteristics and descriptors without reading
+    // their current values — significantly fewer BLE round-trips, less likely to
+    // time out before the CCCD write.
+    m_service->discoverDetails(QLowEnergyService::DiscoveryMode::SkipValueDiscovery);
 }
 
 void RaceBoxProvider::onServiceStateChanged(QLowEnergyService::ServiceState state)
