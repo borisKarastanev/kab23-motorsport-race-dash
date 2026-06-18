@@ -21,9 +21,10 @@ sudo apt install -y \
 
 echo "=== Building application ==="
 mkdir -p "$REPO_DIR/build"
-cd "$REPO_DIR/build"
-cmake .. -DCMAKE_BUILD_TYPE=Release
-make -j$(nproc)
+chown -R "$DASHBOARD_USER:$DASHBOARD_USER" "$REPO_DIR/build"
+# Run cmake and make as the repo owner — Qt cmake macros write into the source
+# tree via configure_file, which fails when running as root.
+sudo -u "$DASHBOARD_USER" bash -c "cd '$REPO_DIR/build' && cmake .. -DCMAKE_BUILD_TYPE=Release && make -j\$(nproc)"
 
 echo "=== Installing systemd CAN service ==="
 sudo cp "$REPO_DIR/systemd/$CAN_SERVICE" /etc/systemd/system/
