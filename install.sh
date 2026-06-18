@@ -2,31 +2,85 @@
 set -e
 
 REPO_DIR="$(cd "$(dirname "$0")" && pwd)"
-SERVICE_NAME="can0.service"
-APP_BINARY="$REPO_DIR/build/bmw-e46-dash"
+DASHBOARD_USER="${SUDO_USER:-$(whoami)}"
+USER_HOME=$(getent passwd "$DASHBOARD_USER" | cut -d: -f6)
+CAN_SERVICE="can0.service"
+DASH_SERVICE="bmw-e46-dash.service"
 
 echo "=== Installing dependencies ==="
 sudo apt install -y \
     qt6-base-dev \
     qt6-declarative-dev \
     qt6-serialbus-dev \
+    qt6-connectivity-dev \
     can-utils \
     libsocketcan2 \
-    xvfb
+    libxkbcommon-dev \
+    libegl-mesa0 \
+    libgl1-mesa-dri
 
 echo "=== Building application ==="
 mkdir -p "$REPO_DIR/build"
-cd "$REPO_DIR/build"
-cmake .. -DCMAKE_BUILD_TYPE=Release
-make -j$(nproc)
+chown -R "$DASHBOARD_USER:$DASHBOARD_USER" "$REPO_DIR/build"
+# Run cmake and make as the repo owner — Qt cmake macros write into the source
+# tree via configure_file, which fails when running as root.
+sudo -u "$DASHBOARD_USER" bash -c "cd '$REPO_DIR/build' && cmake .. -DCMAKE_BUILD_TYPE=Release && make -j\$(nproc)"
+
+echo "=== Enabling Bluetooth adapter ==="
+# Unblock now so the rest of the script can use BT immediately
+rfkill unblock bluetooth || true
+# Persistent: one-shot service that unblocks BT before bluetoothd and the dashboard
+sudo tee /etc/systemd/system/bluetooth-unblock.service > /dev/null << 'SVCEOF'
+[Unit]
+Description=Unblock Bluetooth adapter (rfkill)
+Before=bluetooth.service
+DefaultDependencies=no
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/rfkill unblock bluetooth
+RemainAfterExit=yes
+
+[Install]
+WantedBy=sysinit.target
+SVCEOF
+sudo systemctl daemon-reload
+sudo systemctl enable bluetooth-unblock.service
+sudo systemctl start bluetooth-unblock.service || true
 
 echo "=== Installing systemd CAN service ==="
-sudo cp "$REPO_DIR/systemd/$SERVICE_NAME" /etc/systemd/system/
+sudo cp "$REPO_DIR/systemd/$CAN_SERVICE" /etc/systemd/system/
 sudo systemctl daemon-reload
-sudo systemctl enable "$SERVICE_NAME"
+sudo systemctl enable "$CAN_SERVICE"
+# Note: 'non-existent unit dev-ttyACM0.device' warning above is expected —
+# that unit is created by udev only when the USB2CAN adapter is plugged in.
 
+echo "=== Installing dashboard system service (console/eglfs mode) ==="
+sed "s|@INSTALL_DIR@|$REPO_DIR|g; s|@DASHBOARD_USER@|$DASHBOARD_USER|g" \
+    "$REPO_DIR/systemd/$DASH_SERVICE" \
+    | sudo tee /etc/systemd/system/$DASH_SERVICE > /dev/null
+sudo systemctl daemon-reload
+sudo systemctl enable "$DASH_SERVICE"
+
+echo "=== Installing XDG autostart (desktop/Wayland/X11 mode) ==="
+AUTOSTART_DIR="$USER_HOME/.config/autostart"
+mkdir -p "$AUTOSTART_DIR"
+cat > "$AUTOSTART_DIR/bmw-e46-dash.desktop" << EOF
+[Desktop Entry]
+Type=Application
+Name=BMW E46 Race Dashboard
+Exec=$REPO_DIR/build/bmw-e46-dash --kiosk
+EOF
+chown -R "$DASHBOARD_USER:$DASHBOARD_USER" "$AUTOSTART_DIR"
+echo "Autostart file: $AUTOSTART_DIR/bmw-e46-dash.desktop"
+
+echo ""
 echo "=== Done ==="
-echo "Plug in the USB2CANFD adapter and reboot, or run:"
-echo "  sudo systemctl start $SERVICE_NAME"
-echo "Then launch the dashboard with:"
-echo "  DISPLAY= $APP_BINARY -platform offscreen"
+echo "User: $DASHBOARD_USER  |  Install dir: $REPO_DIR"
+echo ""
+echo "On next boot the dashboard starts automatically."
+echo "Desktop session (Wayland/X11): XDG autostart launches the app."
+echo "Console/CLI mode:              systemd service uses eglfs."
+echo ""
+echo "To start manually now:"
+echo "  $REPO_DIR/build/bmw-e46-dash --kiosk"

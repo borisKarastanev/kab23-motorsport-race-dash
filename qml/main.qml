@@ -5,6 +5,7 @@ import QtQuick.Layouts 1.15
 Window {
     width: 800
     height: 480
+    visibility: kioskMode ? Window.FullScreen : Window.AutomaticVisibility
     visible: true
     title: "BMW E46 Dashboard"
     color: "#0a0a0a"
@@ -42,6 +43,7 @@ Window {
         id: coolantComp
         Gauge {
             anchors.fill: parent
+            compact: true
             label: "COOLANT"
             unit: "°C"
             value: dataModel.coolantTemp
@@ -56,6 +58,7 @@ Window {
         id: oilTempComp
         Gauge {
             anchors.fill: parent
+            compact: true
             label: "OIL TEMP"
             unit: "°C"
             value: dataModel.oilTemp
@@ -71,6 +74,7 @@ Window {
         anchors.margins: 8
         spacing: 8
 
+        // ── shift-light strip ───────────────────────────────────
         LedStrip {
             Layout.fillWidth: true
             height: 26
@@ -85,27 +89,43 @@ Window {
             allBlueRpm:      dashConfig.allBlueRpm
         }
 
+        // ── main gauge row ──────────────────────────────────────
         RowLayout {
             Layout.fillWidth: true
             Layout.fillHeight: true
             spacing: 8
-            visible: zoneHasContent("left") || zoneHasContent("center") || zoneHasContent("right")
+            visible: zoneHasContent("left") || zoneHasContent("center") || zoneHasContent("right") || dashConfig.lapTimerVisible
 
+            // Left: RPM + lap timer stacked
             ColumnLayout {
-                id: leftPanel
                 Layout.fillWidth: true
                 Layout.fillHeight: true
                 spacing: 8
-                visible: zoneHasContent("left")
+                visible: zoneHasContent("left") || dashConfig.lapTimerVisible
 
-                Loader { active: dashConfig.rpmVisible     && dashConfig.rpmPosition     === "left"; visible: active; Layout.fillWidth: true; Layout.fillHeight: true; sourceComponent: rpmComp }
+                // RPM in the left panel is compact so the lap timer can take the main space
+                Gauge {
+                    visible: dashConfig.rpmVisible && dashConfig.rpmPosition === "left"
+                    Layout.fillWidth: true
+                    Layout.preferredHeight: 105
+                    label: "RPM"
+                    value: dataModel.rpm
+                    maxValue: 8000
+                    compact: true
+                }
                 Loader { active: dashConfig.speedVisible   && dashConfig.speedPosition   === "left"; visible: active; Layout.fillWidth: true; Layout.fillHeight: true; sourceComponent: speedComp }
                 Loader { active: dashConfig.coolantVisible && dashConfig.coolantPosition === "left"; visible: active; Layout.fillWidth: true; Layout.fillHeight: true; sourceComponent: coolantComp }
                 Loader { active: dashConfig.oilTempVisible && dashConfig.oilTempPosition === "left"; visible: active; Layout.fillWidth: true; Layout.fillHeight: true; sourceComponent: oilTempComp }
+
+                LapTimer {
+                    visible: dashConfig.lapTimerVisible
+                    Layout.fillWidth: true
+                    Layout.fillHeight: true
+                }
             }
 
+            // Center
             ColumnLayout {
-                id: centerPanel
                 Layout.fillWidth: true
                 Layout.fillHeight: true
                 spacing: 8
@@ -124,8 +144,8 @@ Window {
                 Loader { active: dashConfig.oilTempVisible && dashConfig.oilTempPosition === "center"; visible: active; Layout.fillWidth: true; Layout.fillHeight: true; sourceComponent: oilTempComp }
             }
 
+            // Right
             ColumnLayout {
-                id: rightPanel
                 Layout.fillWidth: true
                 Layout.fillHeight: true
                 spacing: 8
@@ -138,16 +158,10 @@ Window {
             }
         }
 
-        RowLayout {
+        // ── status bar ──────────────────────────────────────────
+        StatusBar {
             Layout.fillWidth: true
-            Layout.preferredHeight: 160
-            spacing: 8
-            visible: zoneHasContent("bottom")
-
-            Loader { active: dashConfig.rpmVisible     && dashConfig.rpmPosition     === "bottom"; visible: active; Layout.fillWidth: true; Layout.fillHeight: true; sourceComponent: rpmComp }
-            Loader { active: dashConfig.speedVisible   && dashConfig.speedPosition   === "bottom"; visible: active; Layout.fillWidth: true; Layout.fillHeight: true; sourceComponent: speedComp }
-            Loader { active: dashConfig.coolantVisible && dashConfig.coolantPosition === "bottom"; visible: active; Layout.fillWidth: true; Layout.fillHeight: true; sourceComponent: coolantComp }
-            Loader { active: dashConfig.oilTempVisible && dashConfig.oilTempPosition === "bottom"; visible: active; Layout.fillWidth: true; Layout.fillHeight: true; sourceComponent: oilTempComp }
+            height: 32
         }
     }
 }

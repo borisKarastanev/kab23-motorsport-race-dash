@@ -1,0 +1,19 @@
+[Unit]
+Description=BMW E46 Race Dashboard
+After=can0.service bluetooth.service bluetooth-unblock.service
+Wants=can0.service
+
+[Service]
+User=@DASHBOARD_USER@
+SupplementaryGroups=video render input bluetooth
+Environment=QT_QPA_PLATFORM=eglfs
+Environment=QT_QPA_EGLFS_PHYSICAL_WIDTH=155
+Environment=QT_QPA_EGLFS_PHYSICAL_HEIGHT=86
+ExecStart=@INSTALL_DIR@/build/bmw-e46-dash --kiosk
+Restart=on-failure
+RestartSec=5
+StartLimitIntervalSec=60
+StartLimitBurst=3
+
+[Install]
+WantedBy=multi-user.target

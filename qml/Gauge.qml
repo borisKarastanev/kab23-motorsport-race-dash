@@ -10,6 +10,7 @@ Rectangle {
     property int    decimalPlaces:    0
     property real   warningThreshold: 999999
     property real   dangerThreshold:  999999
+    property bool   compact:          false
 
     readonly property bool   isWarning:     value >= warningThreshold && value < dangerThreshold
     readonly property bool   isDanger:      value >= dangerThreshold
@@ -31,31 +32,31 @@ Rectangle {
 
     Text {
         anchors.top: parent.top
-        anchors.topMargin: 12
+        anchors.topMargin: compact ? 6 : 12
         anchors.horizontalCenter: parent.horizontalCenter
         text: root.label
         color: "#888888"
-        font.pixelSize: 16
+        font.pixelSize: compact ? 11 : 16
         font.letterSpacing: 3
     }
 
     Text {
         anchors.centerIn: parent
-        anchors.verticalCenterOffset: -8
+        anchors.verticalCenterOffset: compact ? -4 : -8
         text: root.formattedValue
         color: "#ffffff"
-        font.pixelSize: 72
+        font.pixelSize: compact ? 44 : 72
         font.bold: true
         font.family: "monospace"
     }
 
     Text {
         anchors.bottom: parent.bottom
-        anchors.bottomMargin: 12
+        anchors.bottomMargin: compact ? 6 : 12
         anchors.horizontalCenter: parent.horizontalCenter
         text: root.unit
         color: root.isWarning || root.isDanger ? "#cccccc" : "#555555"
-        font.pixelSize: 15
+        font.pixelSize: compact ? 11 : 15
         font.letterSpacing: 1
     }
 }

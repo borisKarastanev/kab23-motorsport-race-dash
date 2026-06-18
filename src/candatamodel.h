@@ -23,6 +23,7 @@ public:
 
 public slots:
     void onFrame(const QCanBusFrame &frame);
+    void setSpeed(int kmh);
 
 signals:
     void rpmChanged();

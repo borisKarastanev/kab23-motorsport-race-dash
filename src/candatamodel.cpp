@@ -17,8 +17,16 @@ void CanDataModel::onFrame(const QCanBusFrame &frame)
 
     case CanScaling::kFrameRpm:
         if (p.size() >= CanScaling::kOffsetRpm + 2) {
-            m_rpm = CanScaling::decodeRpm(qFromBigEndian<quint16>(p.constData() + CanScaling::kOffsetRpm));
-            m_dirty |= kDirtyRpm;
+            int rpm = CanScaling::decodeRpm(qFromBigEndian<quint16>(p.constData() + CanScaling::kOffsetRpm));
+            rpm = qMin(rpm, 7000);
+            // At 50 Hz frame rate, a >2000 RPM single-frame drop is a CAN transient,
+            // not a real deceleration event — reject it.
+            if (m_rpm > 600 && rpm < m_rpm - 2000)
+                break;
+            if (rpm == m_rpm)
+                break;
+            m_rpm = rpm;
+            emit rpmChanged(); // bypass the 10 Hz timer — RPM needs immediate QML updates
         }
         break;
 
@@ -41,6 +49,12 @@ void CanDataModel::onFrame(const QCanBusFrame &frame)
     }
 }
 
+void CanDataModel::setSpeed(int kmh)
+{
+    m_speed = kmh;
+    m_dirty |= kDirtySpeed;
+}
+
 void CanDataModel::emitNotifications()
 {
     if (!m_dirty)
@@ -48,7 +62,6 @@ void CanDataModel::emitNotifications()
     const quint8 dirty = m_dirty;
     m_dirty = 0;
 
-    if (dirty & kDirtyRpm)     emit rpmChanged();
     if (dirty & kDirtyCoolant) emit coolantTempChanged();
     if (dirty & kDirtyOilTemp) emit oilTempChanged();
     if (dirty & kDirtySpeed)   emit speedChanged();
