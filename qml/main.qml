@@ -43,6 +43,7 @@ Window {
         id: coolantComp
         Gauge {
             anchors.fill: parent
+            compact: true
             label: "COOLANT"
             unit: "°C"
             value: dataModel.coolantTemp
@@ -57,6 +58,7 @@ Window {
         id: oilTempComp
         Gauge {
             anchors.fill: parent
+            compact: true
             label: "OIL TEMP"
             unit: "°C"
             value: dataModel.oilTemp

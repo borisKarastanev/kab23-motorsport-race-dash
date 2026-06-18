@@ -17,7 +17,13 @@ void CanDataModel::onFrame(const QCanBusFrame &frame)
 
     case CanScaling::kFrameRpm:
         if (p.size() >= CanScaling::kOffsetRpm + 2) {
-            m_rpm = CanScaling::decodeRpm(qFromBigEndian<quint16>(p.constData() + CanScaling::kOffsetRpm));
+            int rpm = CanScaling::decodeRpm(qFromBigEndian<quint16>(p.constData() + CanScaling::kOffsetRpm));
+            rpm = qMin(rpm, 7000);
+            // At 50 Hz frame rate, a >2000 RPM single-frame drop is a CAN transient,
+            // not a real deceleration event — reject it.
+            if (m_rpm > 600 && rpm < m_rpm - 2000)
+                break;
+            m_rpm = rpm;
             m_dirty |= kDirtyRpm;
         }
         break;
