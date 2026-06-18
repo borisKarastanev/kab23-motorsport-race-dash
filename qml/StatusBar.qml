@@ -84,12 +84,14 @@ Rectangle {
         // Spacer
         Item { Layout.fillWidth: true }
 
-        // Finish line button
+        // Finish line button — enabled only when GPS fix is active
         Rectangle {
             height: 20
             width: finishLineLabel.width + 16
             color: mouseArea.pressed ? "#1a2a1a" : "transparent"
-            border.color: raceBoxModel.finishLineSet ? "#2a4a2a" : "#333333"
+            border.color: raceBoxModel.finishLineSet ? "#2a4a2a"
+                        : raceBoxModel.hasFix        ? "#445544"
+                        :                              "#222222"
             border.width: 1
             radius: 2
             anchors.verticalCenter: parent.verticalCenter
@@ -98,7 +100,9 @@ Rectangle {
                 id: finishLineLabel
                 anchors.centerIn: parent
                 text: raceBoxModel.finishLineSet ? "✓ FINISH LINE SET" : "+ SET FINISH LINE"
-                color: raceBoxModel.finishLineSet ? "#00cc44" : "#555555"
+                color: raceBoxModel.finishLineSet ? "#00cc44"
+                     : raceBoxModel.hasFix        ? "#558855"
+                     :                              "#333333"
                 font.pixelSize: 10
                 font.letterSpacing: 1
                 font.family: "monospace"

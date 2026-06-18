@@ -61,6 +61,8 @@ signals:
     void batteryPercentChanged();
     void batteryChargingChanged();
     void finishLineSetChanged();
+    // Emitted on each finish line tap so the caller can persist the coordinates
+    void finishLineLearned(double lat, double lon);
     // Emitted to feed CanDataModel
     void speedKmhChanged(int kmh);
 

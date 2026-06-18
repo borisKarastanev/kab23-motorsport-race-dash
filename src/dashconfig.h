@@ -38,6 +38,9 @@ class DashConfig : public QObject {
 public:
     explicit DashConfig(QObject *parent = nullptr);
 
+public slots:
+    void saveFinishLine(double lat, double lon);
+
     int     ledCount()        const { return m_ledCount; }
     int     flashIntervalMs() const { return m_flashIntervalMs; }
     int     pair0Rpm()        const { return m_pair0Rpm; }

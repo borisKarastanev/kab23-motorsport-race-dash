@@ -129,3 +129,14 @@ DashConfig::DashConfig(QObject *parent) : QObject(parent)
     m_finishLineRadiusM  = s.value("FinishLine.RadiusM",   m_finishLineRadiusM).toDouble();
     s.endGroup();
 }
+
+void DashConfig::saveFinishLine(double lat, double lon)
+{
+    // QSettings loads the full file on construction, so existing keys are preserved.
+    // Calling setValue() and letting it sync on destruction updates only these two entries.
+    QSettings s(configPath(), QSettings::IniFormat);
+    s.beginGroup("RaceBox");
+    s.setValue("FinishLine.Latitude",  lat);
+    s.setValue("FinishLine.Longitude", lon);
+    s.endGroup();
+}

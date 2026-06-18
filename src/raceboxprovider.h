@@ -20,11 +20,11 @@ public:
 
 private slots:
     void onDeviceDiscovered(const QBluetoothDeviceInfo &info);
-    void onDiscoveryFinished();
+    void onScanFinished();
     void onScanError(QBluetoothDeviceDiscoveryAgent::Error error);
     void onConnected();
     void onDisconnected();
-    void onServiceDiscovered(const QBluetoothUuid &uuid);
+    void onAllServicesDiscovered();   // fires when controller finishes enumerating all services
     void onServiceStateChanged(QLowEnergyService::ServiceState state);
     void onCharacteristicChanged(const QLowEnergyCharacteristic &c,
                                  const QByteArray &value);

@@ -27,18 +27,17 @@ RaceBoxProvider::RaceBoxProvider(const QString &deviceNamePrefix, QObject *paren
 
 void RaceBoxProvider::start()
 {
-    // Ensure the local Bluetooth adapter is powered on before scanning
     QBluetoothLocalDevice localDevice;
     if (localDevice.isValid() &&
         localDevice.hostMode() == QBluetoothLocalDevice::HostPoweredOff)
         localDevice.setHostMode(QBluetoothLocalDevice::HostConnectable);
 
     m_scanner = new QBluetoothDeviceDiscoveryAgent(this);
-    m_scanner->setLowEnergyDiscoveryTimeout(10000); // 10 s scan, restarts in onDiscoveryFinished
+    m_scanner->setLowEnergyDiscoveryTimeout(10000);
     connect(m_scanner, &QBluetoothDeviceDiscoveryAgent::deviceDiscovered,
             this, &RaceBoxProvider::onDeviceDiscovered);
     connect(m_scanner, &QBluetoothDeviceDiscoveryAgent::finished,
-            this, &RaceBoxProvider::onDiscoveryFinished);
+            this, &RaceBoxProvider::onScanFinished);
     connect(m_scanner, &QBluetoothDeviceDiscoveryAgent::errorOccurred,
             this, &RaceBoxProvider::onScanError);
     m_scanner->start(QBluetoothDeviceDiscoveryAgent::LowEnergyMethod);
@@ -58,9 +57,8 @@ void RaceBoxProvider::onDeviceDiscovered(const QBluetoothDeviceInfo &info)
     connectToDevice(info);
 }
 
-void RaceBoxProvider::onDiscoveryFinished()
+void RaceBoxProvider::onScanFinished()
 {
-    // Brief pause before restarting — some BlueZ versions reject immediate restarts
     if (!m_ctrl)
         QTimer::singleShot(2000, this, [this]() {
             if (!m_ctrl) m_scanner->start(QBluetoothDeviceDiscoveryAgent::LowEnergyMethod);
@@ -83,8 +81,8 @@ void RaceBoxProvider::connectToDevice(const QBluetoothDeviceInfo &info)
             this, &RaceBoxProvider::onConnected);
     connect(m_ctrl, &QLowEnergyController::disconnected,
             this, &RaceBoxProvider::onDisconnected);
-    connect(m_ctrl, &QLowEnergyController::serviceDiscovered,
-            this, &RaceBoxProvider::onServiceDiscovered);
+    connect(m_ctrl, &QLowEnergyController::discoveryFinished,
+            this, &RaceBoxProvider::onAllServicesDiscovered);
     m_ctrl->connectToDevice();
 }
 
@@ -97,22 +95,34 @@ void RaceBoxProvider::onConnected()
 void RaceBoxProvider::onDisconnected()
 {
     emit connectionStateChanged(false);
-    // Restart scan to reconnect
-    if (m_scanner)
-        m_scanner->start(QBluetoothDeviceDiscoveryAgent::LowEnergyMethod);
+
+    if (m_service) { m_service->deleteLater(); m_service = nullptr; }
+    if (m_ctrl)    { m_ctrl->deleteLater();    m_ctrl    = nullptr; }
+    m_buffer.clear();
+
+    // Immediate reconnect reuses stale BlueZ D-Bus GATT objects and causes
+    // InvalidService. 5 s gives BlueZ time to fully tear down the connection.
+    QTimer::singleShot(5000, this, [this]() {
+        if (!m_ctrl && m_scanner)
+            m_scanner->start(QBluetoothDeviceDiscoveryAgent::LowEnergyMethod);
+    });
 }
 
-void RaceBoxProvider::onServiceDiscovered(const QBluetoothUuid &uuid)
+void RaceBoxProvider::onAllServicesDiscovered()
 {
-    if (uuid != kUartServiceUuid)
+    if (!m_ctrl->services().contains(kUartServiceUuid)) {
+        m_ctrl->disconnectFromDevice();
         return;
+    }
 
     m_service = m_ctrl->createServiceObject(kUartServiceUuid, this);
     connect(m_service, &QLowEnergyService::stateChanged,
             this, &RaceBoxProvider::onServiceStateChanged);
     connect(m_service, &QLowEnergyService::characteristicChanged,
             this, &RaceBoxProvider::onCharacteristicChanged);
-    m_service->discoverDetails();
+    // SkipValueDiscovery: finds characteristics and descriptors without reading
+    // their values — fewer BLE round-trips, faster than full discovery.
+    m_service->discoverDetails(QLowEnergyService::DiscoveryMode::SkipValueDiscovery);
 }
 
 void RaceBoxProvider::onServiceStateChanged(QLowEnergyService::ServiceState state)
@@ -124,7 +134,6 @@ void RaceBoxProvider::onServiceStateChanged(QLowEnergyService::ServiceState stat
     if (!txChar.isValid())
         return;
 
-    // Enable notifications on the TX characteristic
     const QLowEnergyDescriptor cccd = txChar.descriptor(
         QBluetoothUuid::DescriptorType::ClientCharacteristicConfiguration);
     if (cccd.isValid())
@@ -142,7 +151,6 @@ void RaceBoxProvider::onCharacteristicChanged(const QLowEnergyCharacteristic &c,
 void RaceBoxProvider::tryParsePacket()
 {
     while (m_buffer.size() >= UBX_TOTAL) {
-        // Scan for sync header
         const int syncPos = [&]() -> int {
             for (int i = 0; i <= m_buffer.size() - 2; ++i) {
                 if (static_cast<quint8>(m_buffer[i])   == UBX_SYNC1 &&
@@ -156,17 +164,15 @@ void RaceBoxProvider::tryParsePacket()
         if (syncPos > 0) { m_buffer.remove(0, syncPos); }
         if (m_buffer.size() < UBX_TOTAL) return;
 
-        // Verify class, id, and payload length
         if (static_cast<quint8>(m_buffer[2]) != UBX_CLASS ||
             static_cast<quint8>(m_buffer[3]) != UBX_ID) {
-            m_buffer.remove(0, 2); // skip this sync pair
+            m_buffer.remove(0, 2);
             continue;
         }
         const quint16 payLen = qFromLittleEndian<quint16>(
             reinterpret_cast<const uchar *>(m_buffer.constData() + 4));
         if (payLen != UBX_PAYLOAD) { m_buffer.remove(0, 2); continue; }
 
-        // Verify UBX checksum (over bytes 2..5+payLen)
         quint8 ckA = 0, ckB = 0;
         for (int i = 2; i < 6 + UBX_PAYLOAD; ++i) {
             ckA += static_cast<quint8>(m_buffer[i]);
@@ -178,7 +184,6 @@ void RaceBoxProvider::tryParsePacket()
             continue;
         }
 
-        // Good packet — decode payload
         const uchar *p = reinterpret_cast<const uchar *>(m_buffer.constData() + 6);
 
         RaceBoxData d;
