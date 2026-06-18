@@ -3,6 +3,7 @@
 #include "raceboxprovider.h"
 #include <QtEndian>
 #include <QTimer>
+#include <QDebug>
 
 // Nordic UART service
 const QBluetoothUuid RaceBoxProvider::kUartServiceUuid{
@@ -41,6 +42,7 @@ void RaceBoxProvider::start()
             this, &RaceBoxProvider::onDiscoveryFinished);
     connect(m_scanner, &QBluetoothDeviceDiscoveryAgent::errorOccurred,
             this, &RaceBoxProvider::onScanError);
+    qDebug() << "[RaceBox] Scanning for" << m_deviceNamePrefix;
     m_scanner->start(QBluetoothDeviceDiscoveryAgent::LowEnergyMethod);
 }
 
@@ -54,6 +56,7 @@ void RaceBoxProvider::onDeviceDiscovered(const QBluetoothDeviceInfo &info)
 {
     if (!info.name().startsWith(m_deviceNamePrefix))
         return;
+    qDebug() << "[RaceBox] Found device:" << info.name() << info.address().toString();
     m_scanner->stop();
     connectToDevice(info);
 }
@@ -63,13 +66,17 @@ void RaceBoxProvider::onDiscoveryFinished()
     // Brief pause before restarting — some BlueZ versions reject immediate restarts
     if (!m_ctrl)
         QTimer::singleShot(2000, this, [this]() {
-            if (!m_ctrl) m_scanner->start(QBluetoothDeviceDiscoveryAgent::LowEnergyMethod);
+            if (!m_ctrl) {
+                qDebug() << "[RaceBox] Scan finished, no device — restarting scan";
+                m_scanner->start(QBluetoothDeviceDiscoveryAgent::LowEnergyMethod);
+            }
         });
 }
 
-void RaceBoxProvider::onScanError(QBluetoothDeviceDiscoveryAgent::Error)
+void RaceBoxProvider::onScanError(QBluetoothDeviceDiscoveryAgent::Error err)
 {
     // Adapter may not be ready at boot (race with bluetoothd startup) — retry after delay
+    qDebug() << "[RaceBox] Scan error" << err << "— retrying in 5 s";
     if (!m_ctrl)
         QTimer::singleShot(5000, this, [this]() {
             if (!m_ctrl) m_scanner->start(QBluetoothDeviceDiscoveryAgent::LowEnergyMethod);
@@ -85,50 +92,75 @@ void RaceBoxProvider::connectToDevice(const QBluetoothDeviceInfo &info)
             this, &RaceBoxProvider::onDisconnected);
     connect(m_ctrl, &QLowEnergyController::serviceDiscovered,
             this, &RaceBoxProvider::onServiceDiscovered);
+    connect(m_ctrl, &QLowEnergyController::errorOccurred,
+            this, [](QLowEnergyController::Error err) {
+                qDebug() << "[RaceBox] Controller error:" << err;
+            });
+    qDebug() << "[RaceBox] Connecting to device…";
     m_ctrl->connectToDevice();
 }
 
 void RaceBoxProvider::onConnected()
 {
+    qDebug() << "[RaceBox] Connected — discovering services";
     emit connectionStateChanged(true);
     m_ctrl->discoverServices();
 }
 
 void RaceBoxProvider::onDisconnected()
 {
+    qDebug() << "[RaceBox] Disconnected — restarting scan";
     emit connectionStateChanged(false);
-    // Restart scan to reconnect
+
+    // Clean up so onDiscoveryFinished correctly detects "no active connection"
+    if (m_service) { m_service->deleteLater(); m_service = nullptr; }
+    if (m_ctrl)    { m_ctrl->deleteLater();    m_ctrl    = nullptr; }
+    m_buffer.clear();
+
     if (m_scanner)
         m_scanner->start(QBluetoothDeviceDiscoveryAgent::LowEnergyMethod);
 }
 
 void RaceBoxProvider::onServiceDiscovered(const QBluetoothUuid &uuid)
 {
+    qDebug() << "[RaceBox] Service discovered:" << uuid.toString();
     if (uuid != kUartServiceUuid)
         return;
 
+    qDebug() << "[RaceBox] UART service found — discovering details";
     m_service = m_ctrl->createServiceObject(kUartServiceUuid, this);
     connect(m_service, &QLowEnergyService::stateChanged,
             this, &RaceBoxProvider::onServiceStateChanged);
     connect(m_service, &QLowEnergyService::characteristicChanged,
             this, &RaceBoxProvider::onCharacteristicChanged);
+    connect(m_service, &QLowEnergyService::errorOccurred,
+            this, [](QLowEnergyService::ServiceError err) {
+                qDebug() << "[RaceBox] Service error:" << err;
+            });
     m_service->discoverDetails();
 }
 
 void RaceBoxProvider::onServiceStateChanged(QLowEnergyService::ServiceState state)
 {
+    qDebug() << "[RaceBox] Service state:" << state;
     if (state != QLowEnergyService::RemoteServiceDiscovered)
         return;
 
     const QLowEnergyCharacteristic txChar = m_service->characteristic(kTxCharUuid);
-    if (!txChar.isValid())
+    if (!txChar.isValid()) {
+        qDebug() << "[RaceBox] TX characteristic not found — check UUID";
         return;
+    }
 
-    // Enable notifications on the TX characteristic
     const QLowEnergyDescriptor cccd = txChar.descriptor(
         QBluetoothUuid::DescriptorType::ClientCharacteristicConfiguration);
-    if (cccd.isValid())
-        m_service->writeDescriptor(cccd, QByteArray::fromHex("0100"));
+    if (!cccd.isValid()) {
+        qDebug() << "[RaceBox] CCCD descriptor not found — notifications may not work";
+        return;
+    }
+
+    qDebug() << "[RaceBox] Enabling TX notifications";
+    m_service->writeDescriptor(cccd, QByteArray::fromHex("0100"));
 }
 
 void RaceBoxProvider::onCharacteristicChanged(const QLowEnergyCharacteristic &c,
@@ -174,6 +206,7 @@ void RaceBoxProvider::tryParsePacket()
         }
         if (ckA != static_cast<quint8>(m_buffer[6 + UBX_PAYLOAD]) ||
             ckB != static_cast<quint8>(m_buffer[7 + UBX_PAYLOAD])) {
+            qDebug() << "[RaceBox] Checksum mismatch — discarding 2 bytes";
             m_buffer.remove(0, 2);
             continue;
         }
@@ -192,6 +225,12 @@ void RaceBoxProvider::tryParsePacket()
         d.gForceXMg  = qFromLittleEndian<qint16>(p + 68);
         d.gForceYMg  = qFromLittleEndian<qint16>(p + 70);
         d.gForceZMg  = qFromLittleEndian<qint16>(p + 72);
+
+        qDebug() << "[RaceBox] Packet OK — fix:" << d.fixStatus
+                 << "svs:" << d.numSvs
+                 << "speed mm/s:" << d.speedMmS
+                 << "battery raw:" << d.batteryRaw
+                 << "(" << (d.batteryRaw & 0x7F) << "%" << ((d.batteryRaw & 0x80) ? "charging" : "") << ")";
 
         m_buffer.remove(0, UBX_TOTAL);
         emit dataReady(d);
