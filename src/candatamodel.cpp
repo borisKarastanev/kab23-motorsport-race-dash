@@ -23,8 +23,10 @@ void CanDataModel::onFrame(const QCanBusFrame &frame)
             // not a real deceleration event — reject it.
             if (m_rpm > 600 && rpm < m_rpm - 2000)
                 break;
+            if (rpm == m_rpm)
+                break;
             m_rpm = rpm;
-            m_dirty |= kDirtyRpm;
+            emit rpmChanged(); // bypass the 10 Hz timer — RPM needs immediate QML updates
         }
         break;
 
@@ -60,7 +62,6 @@ void CanDataModel::emitNotifications()
     const quint8 dirty = m_dirty;
     m_dirty = 0;
 
-    if (dirty & kDirtyRpm)     emit rpmChanged();
     if (dirty & kDirtyCoolant) emit coolantTempChanged();
     if (dirty & kDirtyOilTemp) emit oilTempChanged();
     if (dirty & kDirtySpeed)   emit speedChanged();
