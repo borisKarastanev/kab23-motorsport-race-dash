@@ -43,7 +43,7 @@ void MockCanProvider::onTick()
 QCanBusFrame MockCanProvider::rpmFrame(int rpm)
 {
     QByteArray payload(8, 0x00);
-    qToBigEndian<quint16>(CanScaling::encodeRpm(rpm), payload.data() + CanScaling::kOffsetRpm);
+    CanScaling::encodeRpm(rpm, payload.data() + CanScaling::kOffsetRpm);
     return QCanBusFrame(CanScaling::kFrameRpm, payload);
 }
 

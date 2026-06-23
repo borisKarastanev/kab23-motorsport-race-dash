@@ -13,14 +13,15 @@ constexpr quint32 kFrameTemp = 0x329;
 constexpr quint32 kFrameDme4 = 0x545;
 
 // Byte offsets within each frame — single source of truth for encoder and decoder
-constexpr int kOffsetRpm     = 1; // 0x316 bytes 1-2, BE u16
+constexpr int kOffsetRpm     = 2; // 0x316 bytes 2-3, LE u16 (byte 2 = LSB, byte 3 = MSB)
 constexpr int kOffsetCoolant = 1; // 0x329 byte 1
 constexpr int kOffsetOilTemp = 4; // 0x545 byte 4
 
-// 0x316 RPM: raw = rpm * 6.42
-constexpr double kRpmScale = 6.42;
-inline quint16 encodeRpm(int rpm)       { return static_cast<quint16>(rpm  * kRpmScale); }
-inline int     decodeRpm(quint16 raw)   { return static_cast<int>(raw / kRpmScale); }
+// 0x316 RPM: DME spec N_ENG = raw * 0.15625  →  kRawPerRpm = 6.4 (exact)
+// Empirical candump read ~6.42; the <0.3% difference is below display resolution.
+constexpr double kRawPerRpm = 6.4;
+inline void encodeRpm(int rpm, char *dst) { qToLittleEndian<quint16>(static_cast<quint16>(rpm * kRawPerRpm), dst); }
+inline int  decodeRpm(const char *src)    { return static_cast<int>(qFromLittleEndian<quint16>(src) / kRawPerRpm); }
 
 // 0x329 coolant: 0.75 * byte - 48.373 °C  (MS43 DME sensor calibration)
 constexpr double kCoolantScale  = 0.75;
@@ -32,6 +33,5 @@ inline double  decodeCoolant(quint8 b)     { return kCoolantScale * b - kCoolant
 constexpr double kOilTempOffset = 48.0;
 inline quint8  encodeOilTemp(double c)     { return static_cast<quint8>(c + kOilTempOffset); }
 inline double  decodeOilTemp(quint8 b)     { return static_cast<double>(b) - kOilTempOffset; }
-
 
 } // namespace CanScaling
