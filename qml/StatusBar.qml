@@ -6,6 +6,8 @@ Rectangle {
     border.color: "#1a1a1a"
     border.width: 1
 
+    signal resetFinishLineRequested()
+
     RowLayout {
         anchors.fill: parent
         anchors.leftMargin: 10
@@ -99,7 +101,9 @@ Rectangle {
             Text {
                 id: finishLineLabel
                 anchors.centerIn: parent
-                text: raceBoxModel.finishLineSet ? "✓ FINISH LINE SET" : "+ SET FINISH LINE"
+                text: raceBoxModel.finishLineSet
+                      ? (mouseArea.pressed ? "⟳ HOLD TO RESET..." : "✓ FINISH LINE SET")
+                      : "+ SET FINISH LINE"
                 color: raceBoxModel.finishLineSet ? "#00cc44"
                      : raceBoxModel.hasFix        ? "#558855"
                      :                              "#333333"
@@ -112,7 +116,15 @@ Rectangle {
                 id: mouseArea
                 anchors.fill: parent
                 enabled: raceBoxModel.hasFix
-                onClicked: raceBoxModel.learnFinishLineHere()
+                pressAndHoldInterval: 3000
+                onClicked: {
+                    if (!raceBoxModel.finishLineSet)
+                        raceBoxModel.learnFinishLineHere()
+                }
+                onPressAndHold: {
+                    if (raceBoxModel.finishLineSet)
+                        resetFinishLineRequested()
+                }
             }
         }
     }

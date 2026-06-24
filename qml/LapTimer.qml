@@ -123,4 +123,30 @@ Rectangle {
             }
         }
     }
+
+    // Waiting overlay — pulsing prompt shown when finish line is set but not yet crossed
+    Rectangle {
+        visible: raceBoxModel.finishLineSet && raceBoxModel.lapNumber === 0 && raceBoxModel.hasFix
+        anchors.fill: parent
+        color: parent.color
+        radius: parent.radius
+        z: 1
+
+        Text {
+            anchors.centerIn: parent
+            text: "CROSS S/F LINE\nTO START TIMER"
+            color: "#558855"
+            font.pixelSize: 12
+            font.family: "monospace"
+            font.letterSpacing: 2
+            horizontalAlignment: Text.AlignHCenter
+
+            SequentialAnimation on opacity {
+                running: true
+                loops: Animation.Infinite
+                NumberAnimation { to: 0.3; duration: 1000; easing.type: Easing.InOutSine }
+                NumberAnimation { to: 1.0; duration: 1000; easing.type: Easing.InOutSine }
+            }
+        }
+    }
 }

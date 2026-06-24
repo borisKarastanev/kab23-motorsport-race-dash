@@ -83,7 +83,7 @@ private:
     bool    m_speedVisible      = true;
     QString m_speedPosition     = "center";
     bool    m_coolantVisible    = true;
-    QString m_coolantPosition   = "right";
+    QString m_coolantPosition   = "left";
     bool    m_oilTempVisible    = true;
     QString m_oilTempPosition   = "right";
     bool    m_lapTimerVisible   = true;

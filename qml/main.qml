@@ -160,8 +160,107 @@ Window {
 
         // ── status bar ──────────────────────────────────────────
         StatusBar {
+            id: statusBar
             Layout.fillWidth: true
             height: 32
+            onResetFinishLineRequested: finishResetOverlay.visible = true
+        }
+    }
+
+    // ── finish line reset confirmation overlay ──────────────
+    Rectangle {
+        id: finishResetOverlay
+        anchors.fill: parent
+        z: 100
+        visible: false
+        color: "#cc000000"
+
+        Rectangle {
+            anchors.centerIn: parent
+            width: 280
+            height: 130
+            color: "#0d0d0d"
+            border.color: "#2a2a2a"
+            border.width: 1
+            radius: 2
+
+            Column {
+                anchors.centerIn: parent
+                spacing: 18
+
+                Text {
+                    id: overlayMessage
+                    anchors.horizontalCenter: parent.horizontalCenter
+                    text: "RESET FINISH LINE?"
+                    color: "#666666"
+                    font.pixelSize: 11
+                    font.family: "monospace"
+                    font.letterSpacing: 2
+                }
+
+                Row {
+                    id: overlayButtons
+                    anchors.horizontalCenter: parent.horizontalCenter
+                    spacing: 12
+
+                    Rectangle {
+                        width: 110; height: 26
+                        color: confirmArea.pressed ? "#0a1a0a" : "transparent"
+                        border.color: "#2a4a2a"
+                        border.width: 1
+                        radius: 2
+                        Text {
+                            anchors.centerIn: parent
+                            text: "CONFIRM"
+                            color: "#00cc44"
+                            font.pixelSize: 10
+                            font.family: "monospace"
+                            font.letterSpacing: 2
+                        }
+                        MouseArea {
+                            id: confirmArea
+                            anchors.fill: parent
+                            onClicked: {
+                                raceBoxModel.clearFinishLine()
+                                overlayMessage.text = "FINISH LINE CLEARED"
+                                overlayButtons.visible = false
+                                successTimer.start()
+                            }
+                        }
+                    }
+
+                    Rectangle {
+                        width: 110; height: 26
+                        color: cancelArea.pressed ? "#111111" : "transparent"
+                        border.color: "#333333"
+                        border.width: 1
+                        radius: 2
+                        Text {
+                            anchors.centerIn: parent
+                            text: "CANCEL"
+                            color: "#555555"
+                            font.pixelSize: 10
+                            font.family: "monospace"
+                            font.letterSpacing: 2
+                        }
+                        MouseArea {
+                            id: cancelArea
+                            anchors.fill: parent
+                            onClicked: finishResetOverlay.visible = false
+                        }
+                    }
+                }
+            }
+        }
+
+        Timer {
+            id: successTimer
+            interval: 1500
+            onTriggered: {
+                finishResetOverlay.visible = false
+                overlayMessage.text = "RESET FINISH LINE?"
+                overlayButtons.visible = true
+            }
         }
     }
 }
