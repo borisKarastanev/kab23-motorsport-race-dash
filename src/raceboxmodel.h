@@ -46,6 +46,8 @@ public slots:
     void onConnectionStateChanged(bool connected);
     // Callable from QML — sets current GPS position as the finish line
     Q_INVOKABLE void learnFinishLineHere();
+    // Callable from QML — clears the finish line and resets all lap data
+    Q_INVOKABLE void clearFinishLine();
 
 signals:
     void connectedChanged();

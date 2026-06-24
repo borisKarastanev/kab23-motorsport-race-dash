@@ -80,14 +80,10 @@ void RaceBoxModel::onData(const RaceBoxData &d)
     if (fix) {
         m_lastLat = d.latitude;
         m_lastLon = d.longitude;
-        if (!m_lapTimerRunning) {
-            m_lapTimer.start();
-            m_lapTimerRunning = true;
-        }
         updateLapTiming(d.latitude, d.longitude, static_cast<double>(kmhInt));
     }
 
-    m_dirty |= kDirtyCurrentLap;
+    if (m_lapTimerRunning) m_dirty |= kDirtyCurrentLap;
 }
 
 void RaceBoxModel::updateLapTiming(double lat, double lon, double speedKmh)
@@ -123,6 +119,7 @@ void RaceBoxModel::updateLapTiming(double lat, double lon, double speedKmh)
         ++m_lapNumber;
         m_dirty |= kDirtyLapNumber;
         m_lapTimer.restart();
+        m_lapTimerRunning = true;
     }
 
     // Hysteresis: enter at 1× radius, exit at 2× radius
@@ -140,6 +137,21 @@ double RaceBoxModel::haversineM(double lat1, double lon1, double lat2, double lo
                    + std::cos(lat1 * M_PI / 180.0) * std::cos(lat2 * M_PI / 180.0)
                    * std::sin(dLon / 2) * std::sin(dLon / 2);
     return kEarthRadiusM * 2.0 * std::atan2(std::sqrt(a), std::sqrt(1.0 - a));
+}
+
+void RaceBoxModel::clearFinishLine()
+{
+    m_finishLineSet   = false;
+    m_finishLineLat   = 0.0;
+    m_finishLineLon   = 0.0;
+    m_inFinishZone    = false;
+    m_lapTimerRunning = false;
+    m_lapNumber       = 0;
+    m_lastLapMs       = 0;
+    m_bestLapMs       = 0;
+    m_dirty |= kDirtyFinishLine | kDirtyLapNumber | kDirtyLastLap | kDirtyBestLap | kDirtyCurrentLap;
+    emit finishLineLearned(0.0, 0.0);
+    qCInfo(lcRaceBox) << "Finish line cleared";
 }
 
 void RaceBoxModel::emitNotifications()
