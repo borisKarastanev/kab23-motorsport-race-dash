@@ -106,6 +106,7 @@ void RaceBoxModel::updateLapTiming(double lat, double lon, double speedKmh)
             const qint64 lapMs = m_lapTimer.elapsed();
             m_lastLapMs = lapMs;
             m_dirty |= kDirtyLastLap;
+            emit lapCompleted(lapMs);
             const bool newBest = (m_bestLapMs == 0 || lapMs < m_bestLapMs);
             if (newBest) {
                 m_bestLapMs = lapMs;

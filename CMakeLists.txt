@@ -25,6 +25,7 @@ add_executable(bmw-e46-dash
     src/raceboxmodel.cpp
     src/mockraceboxprovider.cpp
     src/raceboxprovider.cpp
+    src/sessionmodel.cpp
     ${RESOURCES}
 )
 

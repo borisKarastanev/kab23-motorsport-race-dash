@@ -26,4 +26,5 @@ private:
     quint64 m_tick          = 0;
     int     m_currentLap    = 0; // 0-based; stops after kLapCount
     quint64 m_lapStartTick  = 0;
+    bool    m_stopped       = false; // true after laps complete — emits speed=0
 };

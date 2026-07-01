@@ -11,6 +11,7 @@
 #include "src/dashconfig.h"
 #include "src/raceboxmodel.h"
 #include "src/mockraceboxprovider.h"
+#include "src/sessionmodel.h"
 #include "src/logging.h"
 
 #ifdef HAVE_BLUETOOTH
@@ -40,6 +41,7 @@ int main(int argc, char *argv[])
     DashConfig    dashConfig;
     CanDataModel  dataModel;
     RaceBoxModel  raceBoxModel;
+    SessionModel  sessionModel(&dataModel, &raceBoxModel);
 
     if (useMock) {
         double flLat, flLon, flRadius;
@@ -89,9 +91,10 @@ int main(int argc, char *argv[])
                      &dashConfig, &DashConfig::saveFinishLine);
 
     QQmlApplicationEngine engine;
-    engine.rootContext()->setContextProperty("dashConfig",   &dashConfig);
+    engine.rootContext()->setContextProperty("dashConfig",    &dashConfig);
     engine.rootContext()->setContextProperty("dataModel",    &dataModel);
     engine.rootContext()->setContextProperty("raceBoxModel", &raceBoxModel);
+    engine.rootContext()->setContextProperty("sessionModel", &sessionModel);
     engine.rootContext()->setContextProperty("kioskMode",    kioskMode);
     engine.load(QUrl(QStringLiteral("qrc:/qml/main.qml")));
 

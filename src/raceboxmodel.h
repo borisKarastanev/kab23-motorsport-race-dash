@@ -67,6 +67,8 @@ signals:
     void finishLineLearned(double lat, double lon);
     // Emitted to feed CanDataModel
     void speedKmhChanged(int kmh);
+    // Emitted immediately when a lap completes — not throttled, safe for persistence
+    void lapCompleted(qint64 ms);
 
 private slots:
     void emitNotifications();
