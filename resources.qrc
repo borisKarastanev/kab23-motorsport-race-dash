@@ -2,6 +2,11 @@
 <RCC version="1.0">
     <qresource prefix="/">
         <file>qml/main.qml</file>
+        <file>qml/DashboardView.qml</file>
+        <file>qml/SettingsView.qml</file>
+        <file>qml/SettingsMenu.qml</file>
+        <file>qml/SettingsDetail.qml</file>
+        <file>qml/settings/PlaceholderSetting.qml</file>
         <file>qml/Gauge.qml</file>
         <file>qml/GearIndicator.qml</file>
         <file>qml/LedStrip.qml</file>
