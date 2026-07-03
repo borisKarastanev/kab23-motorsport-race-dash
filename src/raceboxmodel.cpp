@@ -81,6 +81,18 @@ void RaceBoxModel::onData(const RaceBoxData &d)
         m_lastLat = d.latitude;
         m_lastLon = d.longitude;
         updateLapTiming(d.latitude, d.longitude, static_cast<double>(kmhInt));
+
+        if (m_lapTimerRunning) {
+            static constexpr double kMinPointSpacingM = 2.0;
+            const bool firstPoint = m_currentLapPath.isEmpty();
+            if (firstPoint
+                || haversineM(d.latitude, d.longitude, m_lastStoredLat, m_lastStoredLon) >= kMinPointSpacingM) {
+                m_currentLapPath.append(d.latitude);
+                m_currentLapPath.append(d.longitude);
+                m_lastStoredLat = d.latitude;
+                m_lastStoredLon = d.longitude;
+            }
+        }
     }
 
     if (m_lapTimerRunning) m_dirty |= kDirtyCurrentLap;
@@ -106,7 +118,12 @@ void RaceBoxModel::updateLapTiming(double lat, double lon, double speedKmh)
             const qint64 lapMs = m_lapTimer.elapsed();
             m_lastLapMs = lapMs;
             m_dirty |= kDirtyLastLap;
-            emit lapCompleted(lapMs);
+            QVariantList pathList;
+            pathList.reserve(m_currentLapPath.size());
+            for (double v : m_currentLapPath)
+                pathList.append(v);
+            emit lapCompleted(lapMs, pathList);
+            m_currentLapPath.clear();
             const bool newBest = (m_bestLapMs == 0 || lapMs < m_bestLapMs);
             if (newBest) {
                 m_bestLapMs = lapMs;
@@ -121,6 +138,10 @@ void RaceBoxModel::updateLapTiming(double lat, double lon, double speedKmh)
         m_dirty |= kDirtyLapNumber;
         m_lapTimer.restart();
         m_lapTimerRunning = true;
+        if (!m_hasStartedTiming) {
+            m_hasStartedTiming = true;
+            m_dirty |= kDirtyStartedTiming;
+        }
     }
 
     // Hysteresis: enter at 1× radius, exit at 2× radius
@@ -140,19 +161,33 @@ double RaceBoxModel::haversineM(double lat1, double lon1, double lat2, double lo
     return kEarthRadiusM * 2.0 * std::atan2(std::sqrt(a), std::sqrt(1.0 - a));
 }
 
-void RaceBoxModel::clearFinishLine()
+void RaceBoxModel::resetLapState()
 {
-    m_finishLineSet   = false;
-    m_finishLineLat   = 0.0;
-    m_finishLineLon   = 0.0;
     m_inFinishZone    = false;
     m_lapTimerRunning = false;
     m_lapNumber       = 0;
     m_lastLapMs       = 0;
     m_bestLapMs       = 0;
-    m_dirty |= kDirtyFinishLine | kDirtyLapNumber | kDirtyLastLap | kDirtyBestLap | kDirtyCurrentLap;
+    m_currentLapPath.clear();
+    m_dirty |= kDirtyLapNumber | kDirtyLastLap | kDirtyBestLap | kDirtyCurrentLap;
+}
+
+void RaceBoxModel::clearFinishLine()
+{
+    resetLapState();
+    m_finishLineSet    = false;
+    m_finishLineLat    = 0.0;
+    m_finishLineLon    = 0.0;
+    m_hasStartedTiming = false;
+    m_dirty |= kDirtyFinishLine | kDirtyStartedTiming;
     emit finishLineLearned(0.0, 0.0);
     qCInfo(lcRaceBox) << "Finish line cleared";
+}
+
+void RaceBoxModel::resetLapCounters()
+{
+    resetLapState();
+    qCInfo(lcRaceBox) << "Lap counters reset — session saved";
 }
 
 void RaceBoxModel::emitNotifications()
@@ -173,4 +208,5 @@ void RaceBoxModel::emitNotifications()
     if (dirty & kDirtyBattery)    emit batteryPercentChanged();
     if (dirty & kDirtyCharging)   emit batteryChargingChanged();
     if (dirty & kDirtyFinishLine) emit finishLineSetChanged();
+    if (dirty & kDirtyStartedTiming) emit hasStartedTimingChanged();
 }

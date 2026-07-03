@@ -24,9 +24,13 @@ public:
 signals:
     void sessionsChanged();
     void hasLapsChanged();
+    // Emitted after a session is persisted — RaceBoxModel listens to reset its
+    // own lap counters, keeping the two models decoupled (signal-only, no
+    // direct method calls in either direction).
+    void sessionSaved();
 
 private slots:
-    void onLapCompleted(qint64 ms);
+    void onLapCompleted(qint64 ms, const QVariantList &path);
     void onSpeedChanged();
     void onOilTempChanged();
     void onCoolantTempChanged();
@@ -41,7 +45,8 @@ private:
 
     QVariantList   m_sessions;
 
-    QList<qint64>  m_currentLapTimes;
+    QList<qint64>       m_currentLapTimes;
+    QList<QVariantList> m_currentLapPaths;
     int            m_topSpeedKmh = 0;
     double         m_maxOilC     = 0.0;
     double         m_maxCoolantC = 0.0;

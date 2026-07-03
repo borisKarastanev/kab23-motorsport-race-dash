@@ -3,7 +3,7 @@
 
 // Simulation parameters
 static constexpr int    kLapCount          = 3;
-static constexpr double kBaseLapS          = 30.0;   // 0:30.000
+static constexpr double kBaseLapS          = 15.0;   // 0:15.000
 static constexpr double kLapImprovementS   = 0.20;   // each lap faster by this much
 static constexpr double kAvgSpeedKmh       = 120.0;
 static constexpr double kSpeedAmplitudeKmh = 40.0;   // ±40 km/h → range 80–160 km/h

@@ -118,9 +118,11 @@ Rectangle {
         }
     }
 
-    // Waiting overlay — pulsing prompt shown when finish line is set but not yet crossed
+    // Waiting overlay — pulsing prompt shown only on the true first crossing of
+    // this app run; a later reset (Save Session) shows plain "--:--" instead.
     Rectangle {
         visible: raceBoxModel.finishLineSet && raceBoxModel.lapNumber === 0 && raceBoxModel.hasFix
+                 && !raceBoxModel.hasStartedTiming
         anchors.fill: parent
         color: parent.color
         radius: parent.radius

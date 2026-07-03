@@ -4,6 +4,8 @@
 #include <QObject>
 #include <QTimer>
 #include <QElapsedTimer>
+#include <QVariantList>
+#include <QVector>
 
 class RaceBoxModel : public QObject {
     Q_OBJECT
@@ -20,6 +22,7 @@ class RaceBoxModel : public QObject {
     Q_PROPERTY(int     batteryPercent  READ batteryPercent  NOTIFY batteryPercentChanged)
     Q_PROPERTY(bool    batteryCharging READ batteryCharging NOTIFY batteryChargingChanged)
     Q_PROPERTY(bool    finishLineSet   READ finishLineSet   NOTIFY finishLineSetChanged)
+    Q_PROPERTY(bool    hasStartedTiming READ hasStartedTiming NOTIFY hasStartedTimingChanged)
 
 public:
     explicit RaceBoxModel(QObject *parent = nullptr);
@@ -37,6 +40,10 @@ public:
     int    batteryPercent()  const { return m_batteryPercent; }
     bool   batteryCharging() const { return m_batteryCharging; }
     bool   finishLineSet()   const { return m_finishLineSet; }
+    // True once the first lap of this app run (or since the finish line was
+    // last cleared) has started — stays true across a resetLapCounters() so
+    // UI prompts like "cross S/F line to start" don't reappear after a save.
+    bool   hasStartedTiming() const { return m_hasStartedTiming; }
 
     // Called from main.cpp to pass dashconfig finish line values at startup
     void setFinishLine(double lat, double lon, double radiusM);
@@ -48,6 +55,11 @@ public slots:
     Q_INVOKABLE void learnFinishLineHere();
     // Callable from QML — clears the finish line and resets all lap data
     Q_INVOKABLE void clearFinishLine();
+    // Connected in main.cpp to SessionModel::sessionSaved — clears lap
+    // counters/timer so the dashboard starts a fresh session on the next
+    // finish-line crossing. Unlike clearFinishLine(), the finish line itself
+    // stays configured.
+    void resetLapCounters();
 
 signals:
     void connectedChanged();
@@ -63,12 +75,14 @@ signals:
     void batteryPercentChanged();
     void batteryChargingChanged();
     void finishLineSetChanged();
+    void hasStartedTimingChanged();
     // Emitted on each finish line tap so the caller can persist the coordinates
     void finishLineLearned(double lat, double lon);
     // Emitted to feed CanDataModel
     void speedKmhChanged(int kmh);
-    // Emitted immediately when a lap completes — not throttled, safe for persistence
-    void lapCompleted(qint64 ms);
+    // Emitted immediately when a lap completes — not throttled, safe for persistence.
+    // path is a flat [lat, lon, lat, lon, …] list of the GPS fixes recorded during the lap.
+    void lapCompleted(qint64 ms, const QVariantList &path);
 
 private slots:
     void emitNotifications();
@@ -76,6 +90,10 @@ private slots:
 private:
     void updateLapTiming(double lat, double lon, double speedKmh);
     static double haversineM(double lat1, double lon1, double lat2, double lon2);
+    // Shared by clearFinishLine() and resetLapCounters() — resets lap number,
+    // timer, and current-lap path. Does not touch m_hasStartedTiming or the
+    // finish-line fields; callers handle those themselves.
+    void resetLapState();
 
     // Connection / fix
     bool   m_connected   = false;
@@ -88,6 +106,12 @@ private:
     qint64        m_bestLapMs   = 0;
     QElapsedTimer m_lapTimer;
     bool          m_lapTimerRunning = false;
+    bool          m_hasStartedTiming = false;
+
+    // Current lap GPS path — flat [lat, lon, lat, lon, …], distance-decimated
+    QVector<double> m_currentLapPath;
+    double          m_lastStoredLat = 0.0;
+    double          m_lastStoredLon = 0.0;
 
     // Finish line (virtual start/finish)
     bool   m_finishLineSet  = false;
@@ -120,6 +144,7 @@ private:
     static constexpr quint16 kDirtyBattery     = 0x100;
     static constexpr quint16 kDirtyFinishLine  = 0x200;
     static constexpr quint16 kDirtyCharging    = 0x400;
+    static constexpr quint16 kDirtyStartedTiming = 0x800;
     quint16 m_dirty = 0;
 
     QTimer m_notifyTimer;

@@ -89,6 +89,8 @@ int main(int argc, char *argv[])
                      &dataModel, &CanDataModel::setSpeed);
     QObject::connect(&raceBoxModel, &RaceBoxModel::finishLineLearned,
                      &dashConfig, &DashConfig::saveFinishLine);
+    QObject::connect(&sessionModel, &SessionModel::sessionSaved,
+                     &raceBoxModel, &RaceBoxModel::resetLapCounters);
 
     QQmlApplicationEngine engine;
     engine.rootContext()->setContextProperty("dashConfig",    &dashConfig);

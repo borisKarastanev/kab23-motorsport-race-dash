@@ -32,12 +32,13 @@ SessionModel::SessionModel(CanDataModel *canModel, RaceBoxModel *raceBoxModel, Q
     load();
 }
 
-void SessionModel::onLapCompleted(qint64 ms)
+void SessionModel::onLapCompleted(qint64 ms, const QVariantList &path)
 {
     if (ms <= 0)
         return;
     const bool wasEmpty = m_currentLapTimes.isEmpty();
     m_currentLapTimes.append(ms);
+    m_currentLapPaths.append(path);
     qCInfo(lcApp) << "[SessionModel] lap appended —" << ms << "ms | total laps:" << m_currentLapTimes.size();
     if (wasEmpty)
         emit hasLapsChanged();
@@ -75,10 +76,19 @@ void SessionModel::saveCurrentSession()
     for (qint64 ms : m_currentLapTimes)
         lapArray.append(static_cast<qint64>(ms));
 
+    QJsonArray pathsArray;
+    for (const QVariantList &path : m_currentLapPaths) {
+        QJsonArray pointArray;
+        for (const QVariant &v : path)
+            pointArray.append(v.toDouble());
+        pathsArray.append(pointArray);
+    }
+
     QJsonObject record;
     record["title"]        = now.toString("yyyy-MM-dd HH:mm");
     record["timestampIso"] = now.toString(Qt::ISODate);
     record["lapMs"]        = lapArray;
+    record["lapPaths"]     = pathsArray;
     record["topSpeedKmh"]  = m_topSpeedKmh;
     record["maxOilC"]      = m_maxOilC;
     record["maxCoolantC"]  = m_maxCoolantC;
@@ -90,10 +100,16 @@ void SessionModel::saveCurrentSession()
 
     // Reset accumulators so a fresh session can be recorded without rebooting
     m_currentLapTimes.clear();
+    m_currentLapPaths.clear();
     m_topSpeedKmh = 0;
     m_maxOilC     = 0.0;
     m_maxCoolantC = 0.0;
     emit hasLapsChanged();
+
+    // Let listeners (RaceBoxModel, via main.cpp) know a session was persisted
+    // so lap numbering/timing can start fresh from the next finish-line
+    // crossing instead of continuing to accumulate against the saved session.
+    emit sessionSaved();
 
     qCInfo(lcApp) << "Session saved —" << record["title"].toString()
                   << "| laps:" << lapArray.size()
@@ -129,6 +145,22 @@ void SessionModel::load()
         for (const QJsonValue &l : lapArr)
             laps.append(static_cast<int>(l.toInt()));
         map["lapMs"] = laps;
+
+        // lapPaths: array of flat [lat, lon, …] arrays, parallel to lapMs; absent in
+        // records saved before GPS-path capture existed
+        const QJsonArray pathsArr = obj["lapPaths"].toArray();
+        QVariantList lapPaths;
+        lapPaths.reserve(pathsArr.size());
+        for (const QJsonValue &p : pathsArr) {
+            const QJsonArray pointArr = p.toArray();
+            QVariantList path;
+            path.reserve(pointArr.size());
+            for (const QJsonValue &coord : pointArr)
+                path.append(coord.toDouble());
+            lapPaths.append(path);
+        }
+        map["lapPaths"] = lapPaths;
+
         m_sessions.append(map);
     }
 

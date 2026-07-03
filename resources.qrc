@@ -10,6 +10,7 @@
         <file>qml/settings/PlaceholderSetting.qml</file>
         <file>qml/settings/SessionsList.qml</file>
         <file>qml/settings/SessionSummary.qml</file>
+        <file>qml/settings/TrackMap.qml</file>
         <file>qml/Gauge.qml</file>
         <file>qml/GearIndicator.qml</file>
         <file>qml/LedStrip.qml</file>
