@@ -9,12 +9,15 @@
         <file>qml/SettingsDetail.qml</file>
         <file>qml/settings/PlaceholderSetting.qml</file>
         <file>qml/settings/SessionsList.qml</file>
+        <file>qml/settings/SessionGroupsList.qml</file>
         <file>qml/settings/SessionSummary.qml</file>
         <file>qml/settings/TrackMap.qml</file>
+        <file>qml/settings/TracksBrowser.qml</file>
         <file>qml/Gauge.qml</file>
         <file>qml/GearIndicator.qml</file>
         <file>qml/LedStrip.qml</file>
         <file>qml/LapTimer.qml</file>
         <file>qml/StatusBar.qml</file>
+        <file>data/track-db.json</file>
     </qresource>
 </RCC>

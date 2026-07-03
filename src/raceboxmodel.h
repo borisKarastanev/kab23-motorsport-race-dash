@@ -48,6 +48,13 @@ public:
     // Called from main.cpp to pass dashconfig finish line values at startup
     void setFinishLine(double lat, double lon, double radiusM);
 
+    // Last known GPS fix — used by TrackModel's nearest-track auto-detect scan
+    double lastLat() const { return m_lastLat; }
+    double lastLon() const { return m_lastLon; }
+
+    // Shared distance helper — also used by TrackModel for nearest-track scans
+    static double haversineM(double lat1, double lon1, double lat2, double lon2);
+
 public slots:
     void onData(const RaceBoxData &data);
     void onConnectionStateChanged(bool connected);
@@ -89,7 +96,6 @@ private slots:
 
 private:
     void updateLapTiming(double lat, double lon, double speedKmh);
-    static double haversineM(double lat1, double lon1, double lat2, double lon2);
     // Shared by clearFinishLine() and resetLapCounters() — resets lap number,
     // timer, and current-lap path. Does not touch m_hasStartedTiming or the
     // finish-line fields; callers handle those themselves.

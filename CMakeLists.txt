@@ -7,7 +7,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_AUTOMOC ON)
 set(CMAKE_AUTORCC ON)
 
-find_package(Qt6 REQUIRED COMPONENTS Core Quick SerialBus)
+find_package(Qt6 REQUIRED COMPONENTS Core Quick SerialBus Network)
 find_package(Qt6 OPTIONAL_COMPONENTS Bluetooth)
 
 qt_add_resources(RESOURCES resources.qrc)
@@ -26,6 +26,7 @@ add_executable(bmw-e46-dash
     src/mockraceboxprovider.cpp
     src/raceboxprovider.cpp
     src/sessionmodel.cpp
+    src/trackmodel.cpp
     ${RESOURCES}
 )
 
@@ -35,6 +36,7 @@ target_link_libraries(bmw-e46-dash
     Qt6::Core
     Qt6::Quick
     Qt6::SerialBus
+    Qt6::Network
 )
 
 if(Qt6Bluetooth_FOUND)

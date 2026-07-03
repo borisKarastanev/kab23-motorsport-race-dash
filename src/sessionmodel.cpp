@@ -1,6 +1,7 @@
 #include "sessionmodel.h"
 #include "candatamodel.h"
 #include "raceboxmodel.h"
+#include "trackmodel.h"
 #include "logging.h"
 
 #include <QCoreApplication>
@@ -15,10 +16,12 @@ QString SessionModel::sessionsPath()
     return QCoreApplication::applicationDirPath() + "/sessions.json";
 }
 
-SessionModel::SessionModel(CanDataModel *canModel, RaceBoxModel *raceBoxModel, QObject *parent)
+SessionModel::SessionModel(CanDataModel *canModel, RaceBoxModel *raceBoxModel,
+                           TrackModel *trackModel, QObject *parent)
     : QObject(parent)
     , m_canModel(canModel)
     , m_raceBoxModel(raceBoxModel)
+    , m_trackModel(trackModel)
 {
     connect(m_raceBoxModel, &RaceBoxModel::lapCompleted,
             this, &SessionModel::onLapCompleted);
@@ -92,6 +95,8 @@ void SessionModel::saveCurrentSession()
     record["topSpeedKmh"]  = m_topSpeedKmh;
     record["maxOilC"]      = m_maxOilC;
     record["maxCoolantC"]  = m_maxCoolantC;
+    record["trackId"]      = m_trackModel->activeTrackId();
+    record["trackName"]    = m_trackModel->activeTrackName();
 
     // Prepend to keep newest-first order
     m_sessions.prepend(record.toVariantMap());
@@ -114,6 +119,43 @@ void SessionModel::saveCurrentSession()
     qCInfo(lcApp) << "Session saved —" << record["title"].toString()
                   << "| laps:" << lapArray.size()
                   << "| top speed:" << m_topSpeedKmh << "km/h";
+}
+
+QVariantList SessionModel::sessionGroups() const
+{
+    // m_sessions is already newest-first (prepend on save); iterating in that
+    // order and creating a group on first encounter keeps the group list
+    // sorted by most-recent session with no explicit sort needed.
+    QStringList order;
+    QHash<QString, QVariantMap> groups;
+    QHash<QString, QVariantList> groupSessions;
+
+    for (const QVariant &v : m_sessions) {
+        const QVariantMap session = v.toMap();
+        const QString trackId = session.value("trackId").toString();
+        const QString key = trackId.isEmpty() ? QStringLiteral("__unknown__") : trackId;
+
+        if (!groups.contains(key)) {
+            QVariantMap group;
+            group["trackId"]     = trackId;
+            group["trackName"]   = trackId.isEmpty() ? QStringLiteral("UNKNOWN")
+                                                       : session.value("trackName");
+            group["latestTitle"] = session.value("title");
+            groups[key] = group;
+            order.append(key);
+        }
+        groupSessions[key].append(v);
+    }
+
+    QVariantList result;
+    result.reserve(order.size());
+    for (const QString &key : order) {
+        QVariantMap group = groups.value(key);
+        group["count"]    = groupSessions.value(key).size();
+        group["sessions"] = groupSessions.value(key);
+        result.append(group);
+    }
+    return result;
 }
 
 void SessionModel::load()

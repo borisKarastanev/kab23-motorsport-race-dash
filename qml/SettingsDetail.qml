@@ -15,9 +15,10 @@ Item {
     Component { id: compUi;             PlaceholderSetting { title: "CONFIGURE UI" } }
     Component { id: compNetwork;        PlaceholderSetting { title: "NETWORK CONNECTION" } }
     Component { id: compIntegrations;   PlaceholderSetting { title: "INTEGRATIONS" } }
-    Component { id: compSessions;       SessionsList {} }
-    Component { id: compSessionSummary; SessionSummary {} }
-    Component { id: compTracks;         PlaceholderSetting { title: "TRACKS" } }
+    Component { id: compSessions;         SessionGroupsList {} }
+    Component { id: compSessionTrackList; SessionsList {} }
+    Component { id: compSessionSummary;   SessionSummary {} }
+    Component { id: compTracks;         TracksBrowser {} }
     Component { id: compDevice;         PlaceholderSetting { title: "DEVICE INFO" } }
 
     function registryFor(key) {
@@ -25,8 +26,9 @@ Item {
             case "ui":              return compUi
             case "network":         return compNetwork
             case "integrations":    return compIntegrations
-            case "sessions":        return compSessions
-            case "session-summary": return compSessionSummary
+            case "sessions":           return compSessions
+            case "session-track-list": return compSessionTrackList
+            case "session-summary":    return compSessionSummary
             case "tracks":          return compTracks
             case "device":          return compDevice
             default:                return compUi

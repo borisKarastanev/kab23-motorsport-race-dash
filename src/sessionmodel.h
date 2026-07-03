@@ -6,17 +6,22 @@
 
 class CanDataModel;
 class RaceBoxModel;
+class TrackModel;
 
 class SessionModel : public QObject {
     Q_OBJECT
     Q_PROPERTY(QVariantList sessions READ sessions NOTIFY sessionsChanged)
+    Q_PROPERTY(QVariantList sessionGroups READ sessionGroups NOTIFY sessionsChanged)
     Q_PROPERTY(bool hasLaps READ hasLaps NOTIFY hasLapsChanged)
 
 public:
     explicit SessionModel(CanDataModel *canModel, RaceBoxModel *raceBoxModel,
-                          QObject *parent = nullptr);
+                          TrackModel *trackModel, QObject *parent = nullptr);
 
     const QVariantList &sessions() const { return m_sessions; }
+    // Sessions bucketed by track (untagged sessions fall into "Unknown"),
+    // newest-first — derived on demand from m_sessions, not stored.
+    QVariantList sessionGroups() const;
     bool hasLaps() const { return !m_currentLapTimes.isEmpty(); }
 
     Q_INVOKABLE void saveCurrentSession();
@@ -42,6 +47,7 @@ private:
 
     CanDataModel  *m_canModel     = nullptr;
     RaceBoxModel  *m_raceBoxModel = nullptr;
+    TrackModel    *m_trackModel   = nullptr;
 
     QVariantList   m_sessions;
 

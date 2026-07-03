@@ -12,6 +12,7 @@
 #include "src/raceboxmodel.h"
 #include "src/mockraceboxprovider.h"
 #include "src/sessionmodel.h"
+#include "src/trackmodel.h"
 #include "src/logging.h"
 
 #ifdef HAVE_BLUETOOTH
@@ -41,7 +42,8 @@ int main(int argc, char *argv[])
     DashConfig    dashConfig;
     CanDataModel  dataModel;
     RaceBoxModel  raceBoxModel;
-    SessionModel  sessionModel(&dataModel, &raceBoxModel);
+    TrackModel    trackModel(&raceBoxModel, useMock);
+    SessionModel  sessionModel(&dataModel, &raceBoxModel, &trackModel);
 
     if (useMock) {
         double flLat, flLon, flRadius;
@@ -92,11 +94,23 @@ int main(int argc, char *argv[])
     QObject::connect(&sessionModel, &SessionModel::sessionSaved,
                      &raceBoxModel, &RaceBoxModel::resetLapCounters);
 
+    // Track preselection — global DashConfig finish line above stays as the
+    // no-track fallback; TrackModel additionally remembers a finish line per
+    // track id and overrides the global one whenever a track is active.
+    QObject::connect(&raceBoxModel, &RaceBoxModel::finishLineLearned,
+                     &trackModel, &TrackModel::onFinishLineLearned);
+    QObject::connect(&trackModel, &TrackModel::applyFinishLine,
+                     &raceBoxModel, &RaceBoxModel::setFinishLine);
+    QObject::connect(&trackModel, &TrackModel::clearFinishLineRequested,
+                     &raceBoxModel, &RaceBoxModel::clearFinishLine);
+    trackModel.applyStartupFinishLine();
+
     QQmlApplicationEngine engine;
     engine.rootContext()->setContextProperty("dashConfig",    &dashConfig);
     engine.rootContext()->setContextProperty("dataModel",    &dataModel);
     engine.rootContext()->setContextProperty("raceBoxModel", &raceBoxModel);
     engine.rootContext()->setContextProperty("sessionModel", &sessionModel);
+    engine.rootContext()->setContextProperty("trackModel",   &trackModel);
     engine.rootContext()->setContextProperty("kioskMode",    kioskMode);
     engine.load(QUrl(QStringLiteral("qrc:/qml/main.qml")));
 

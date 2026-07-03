@@ -138,6 +138,7 @@ Item {
 
             Repeater {
                 model: [
+                    { label: "TRACK",        value: payload.trackName || "—" },
                     { label: "TOP SPEED",    value: (payload.topSpeedKmh || 0) + " km/h" },
                     { label: "MAX OIL TEMP", value: (payload.maxOilC     || 0).toFixed(1) + " °C" },
                     { label: "MAX COOLANT",  value: (payload.maxCoolantC || 0).toFixed(1) + " °C" }

@@ -3,16 +3,10 @@ import QtQuick.Controls.Basic
 
 Item {
     property var stackView: null
-    // Set by SettingsDetail from the "session-track-list" push — a single
-    // track group from SessionModel.sessionGroups: {trackId, trackName,
-    // latestTitle, count, sessions: [records newest-first]}.
-    property var payload: ({})
-
-    readonly property var trackSessions: payload.sessions || []
 
     ListView {
         anchors.fill: parent
-        model: trackSessions
+        model: sessionModel.sessionGroups
         clip: true
 
         delegate: Item {
@@ -23,17 +17,41 @@ Item {
                 anchors.fill: parent
                 color: rowArea.pressed ? "#111111" : "#0d0d0d"
 
-                Text {
+                Column {
                     anchors.centerIn: parent
-                    text: modelData.title
-                    color: "#cccccc"
-                    font.pixelSize: 12
-                    font.bold: true
-                    font.family: "monospace"
-                    font.letterSpacing: 2
+                    spacing: 2
+
+                    Text {
+                        anchors.horizontalCenter: parent.horizontalCenter
+                        text: modelData.trackName
+                        color: "#cccccc"
+                        font.pixelSize: 12
+                        font.bold: true
+                        font.family: "monospace"
+                        font.letterSpacing: 2
+                    }
+                    Text {
+                        anchors.horizontalCenter: parent.horizontalCenter
+                        text: modelData.latestTitle
+                        color: "#555555"
+                        font.pixelSize: 9
+                        font.family: "monospace"
+                        font.letterSpacing: 1
+                    }
                 }
 
                 Text {
+                    anchors.right: arrow.left
+                    anchors.rightMargin: 12
+                    anchors.verticalCenter: parent.verticalCenter
+                    text: modelData.count
+                    color: "#444444"
+                    font.pixelSize: 11
+                    font.family: "monospace"
+                }
+
+                Text {
+                    id: arrow
                     anchors.right: parent.right
                     anchors.rightMargin: 20
                     anchors.verticalCenter: parent.verticalCenter
@@ -48,8 +66,8 @@ Item {
                     anchors.fill: parent
                     onClicked: {
                         stackView.push("qrc:/qml/SettingsDetail.qml", {
-                            settingKey: "session-summary",
-                            title: modelData.title,
+                            settingKey: "session-track-list",
+                            title: modelData.trackName,
                             payload: modelData
                         })
                     }
@@ -69,7 +87,7 @@ Item {
 
         Text {
             anchors.centerIn: parent
-            visible: trackSessions.length === 0
+            visible: sessionModel.sessionGroups.length === 0
             text: "NO SAVED SESSIONS"
             color: "#333333"
             font.pixelSize: 12

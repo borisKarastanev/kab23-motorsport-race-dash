@@ -281,4 +281,90 @@ Item {
             }
         }
     }
+
+    // ── nearest-track suggestion overlay ─────────────────────
+    // Suggest-and-confirm: TrackModel's GPS auto-detect never selects a track
+    // silently — it only proposes one here, mirroring finishResetOverlay above.
+    Rectangle {
+        id: trackSuggestOverlay
+        anchors.fill: parent
+        z: 90
+        visible: trackModel.suggestedTrackId !== "" && !finishResetOverlay.visible
+        color: "#cc000000"
+
+        Rectangle {
+            anchors.centerIn: parent
+            width: 280
+            height: 130
+            color: "#0d0d0d"
+            border.color: "#2a2a2a"
+            border.width: 1
+            radius: 2
+
+            Column {
+                anchors.centerIn: parent
+                spacing: 18
+                width: parent.width - 32
+
+                Text {
+                    width: parent.width
+                    horizontalAlignment: Text.AlignHCenter
+                    text: "YOU ARE NEAR\n" + trackModel.suggestedTrackName
+                          + "\nSELECT FOR CURRENT SESSION?"
+                    color: "#666666"
+                    font.pixelSize: 11
+                    font.family: "monospace"
+                    font.letterSpacing: 1
+                    wrapMode: Text.WordWrap
+                }
+
+                Row {
+                    anchors.horizontalCenter: parent.horizontalCenter
+                    spacing: 12
+
+                    Rectangle {
+                        width: 110; height: 26
+                        color: acceptTrackArea.pressed ? "#0a1a0a" : "transparent"
+                        border.color: "#2a4a2a"
+                        border.width: 1
+                        radius: 2
+                        Text {
+                            anchors.centerIn: parent
+                            text: "CONFIRM"
+                            color: "#00cc44"
+                            font.pixelSize: 10
+                            font.family: "monospace"
+                            font.letterSpacing: 2
+                        }
+                        MouseArea {
+                            id: acceptTrackArea
+                            anchors.fill: parent
+                            onClicked: trackModel.acceptSuggestedTrack()
+                        }
+                    }
+
+                    Rectangle {
+                        width: 110; height: 26
+                        color: dismissTrackArea.pressed ? "#111111" : "transparent"
+                        border.color: "#333333"
+                        border.width: 1
+                        radius: 2
+                        Text {
+                            anchors.centerIn: parent
+                            text: "CANCEL"
+                            color: "#555555"
+                            font.pixelSize: 10
+                            font.family: "monospace"
+                            font.letterSpacing: 2
+                        }
+                        MouseArea {
+                            id: dismissTrackArea
+                            anchors.fill: parent
+                            onClicked: trackModel.dismissSuggestedTrack()
+                        }
+                    }
+                }
+            }
+        }
+    }
 }
