@@ -51,14 +51,17 @@ int main(int argc, char *argv[])
     TrackModel    trackModel(&raceBoxModel, useMock);
     SessionModel  sessionModel(&dataModel, &raceBoxModel, &trackModel);
 
-    // Real-mode finish lines are owned by TrackModel and applied below via
-    // applyStartupFinishLine(). Mock mode seeds a synthetic line so laps time
-    // out of the box.
-    if (useMock) {
+    // Finish lines are owned by TrackModel and applied below via
+    // applyStartupFinishLine(). Mock mode seeds a synthetic line (once — skipped
+    // if one is already stored for whichever slot this would write to) through
+    // the same onFinishLineLearned() path a real learn uses, so it lands in
+    // TrackModel (keyed by whatever track is active, or the global "" slot if
+    // none is) and shows up on the session map, not just in RaceBoxModel.
+    if (useMock && trackModel.finishLineFor(trackModel.activeTrackId()).isEmpty()) {
         double latA, lonA, latB, lonB;
         MockRaceBoxProvider::defaultFinishLine(latA, lonA, latB, lonB);
-        raceBoxModel.setFinishLine(latA, lonA, latB, lonB);
-        qCInfo(lcApp) << "Mock finish-line gate loaded";
+        trackModel.onFinishLineLearned(latA, lonA, latB, lonB);
+        qCInfo(lcApp) << "Mock finish-line gate seeded";
     }
 
     // CAN provider

@@ -50,14 +50,10 @@ Item {
             }
             // Include the finish gate so it's never clipped outside the map
             if (root.hasFinish) {
-                const glat = [root.finishLat1, root.finishLat2]
-                const glon = [root.finishLon1, root.finishLon2]
-                for (let k = 0; k < 2; k++) {
-                    if (glat[k] < minLat) minLat = glat[k]
-                    if (glat[k] > maxLat) maxLat = glat[k]
-                    if (glon[k] < minLon) minLon = glon[k]
-                    if (glon[k] > maxLon) maxLon = glon[k]
-                }
+                minLat = Math.min(minLat, root.finishLat1, root.finishLat2)
+                maxLat = Math.max(maxLat, root.finishLat1, root.finishLat2)
+                minLon = Math.min(minLon, root.finishLon1, root.finishLon2)
+                maxLon = Math.max(maxLon, root.finishLon1, root.finishLon2)
             }
 
             const midLat = (minLat + maxLat) / 2.0

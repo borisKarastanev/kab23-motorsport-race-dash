@@ -156,6 +156,12 @@ private:
     qint64 m_prevFixMs   = 0; // arrival time of the previous fix
     bool   m_havePrevFix = false;
 
+    // Latched crossing direction (sign of the path×gate cross product). Set on the
+    // first accepted crossing of a run; later crossings in the opposite direction
+    // (reverse / pit-side passes) are rejected. Survives a resetLapCounters()
+    // session save; cleared only when the gate itself changes. 0 = unlatched.
+    int    m_crossDirSign = 0;
+
     // Recent direction of travel (radians, bearing) — used to orient a learned
     // gate perpendicular to the track.
     double m_headingRad  = 0.0;

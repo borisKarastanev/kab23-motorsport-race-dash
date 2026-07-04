@@ -6,9 +6,15 @@ static constexpr double kEarthRadiusM   = 6371000.0;
 static constexpr double kMetersPerDegLat = 111132.0;
 
 namespace {
-constexpr double kMinCrossSpeedKmh    = 10.0;  // ignore crossings while crawling (pit)
+constexpr double kMinCrossSpeedKmh    = 3.0;   // only reject genuinely-parked GPS jitter;
+                                               // a real slow crossing (hairpin S/F, kart)
+                                               // must still count
 constexpr qint64 kMinLapMs            = 3000;  // debounce: reject re-crossings within 3 s
-constexpr double kLearnGateHalfWidthM = 12.0;  // learned gate spans 24 m across the track
+constexpr qint64 kMaxFixGapMs         = 500;   // don't bridge a stall (missed/burst fixes)
+                                               // into one long segment — the interpolation
+                                               // and geometry can't be trusted across it
+constexpr double kLearnGateHalfWidthM = 20.0;  // learned gate spans 40 m across the track
+                                               // (matches the old finish circle's diameter)
 constexpr double kGatePrefilterM      = 250.0; // skip crossing math when clearly far away
 
 // Metres per degree of longitude at the given latitude.
@@ -56,15 +62,17 @@ void RaceBoxModel::setFinishLine(double latA, double lonA, double latB, double l
     m_gateLatA = latA; m_gateLonA = lonA;
     m_gateLatB = latB; m_gateLonB = lonB;
     m_finishLineSet = true;
+    m_crossDirSign  = 0; // new gate — re-latch crossing direction on the next pass
     m_dirty |= kDirtyFinishLine;
 }
 
 void RaceBoxModel::gateFromHeading(double lat, double lon,
                                    double &latA, double &lonA, double &latB, double &lonB) const
 {
-    // Perpendicular to the recent heading; falls back to a N–S gate if we haven't
-    // seen movement yet (e.g. finish line set while stationary — re-learn while
-    // rolling for a correctly-oriented gate).
+    // Perpendicular to the recent heading. If no heading is known the gate would be
+    // arbitrarily oriented (hdg=0 gives an E–W gate) and could end up parallel to
+    // travel — uncrossable — so learnFinishLineHere() requires a heading before
+    // calling this. The fallback here is purely defensive.
     const double hdg = m_haveHeading ? m_headingRad : 0.0;
     // Travel unit vector in ENU is (sin hdg, cos hdg); its perpendicular is (cos hdg, -sin hdg).
     const double perpE = std::cos(hdg);
@@ -78,6 +86,11 @@ void RaceBoxModel::gateFromHeading(double lat, double lon,
 void RaceBoxModel::learnFinishLineHere()
 {
     if (!m_hasFix) return;
+    if (!m_haveHeading) {
+        // Without a travel direction the gate can't be oriented across the track.
+        qCWarning(lcRaceBox) << "Cannot learn finish line: no heading yet — drive across the line";
+        return;
+    }
     double latA, lonA, latB, lonB;
     gateFromHeading(m_lastLat, m_lastLon, latA, lonA, latB, lonB);
     setFinishLine(latA, lonA, latB, lonB);
@@ -169,7 +182,8 @@ void RaceBoxModel::updateLapTiming(double prevLat, double prevLon, double curLat
                                   double speedKmh, qint64 prevMs, qint64 nowMs)
 {
     if (!m_finishLineSet) return;
-    if (speedKmh <= kMinCrossSpeedKmh) return; // crawling — ignore (pit lane etc.)
+    if (speedKmh <= kMinCrossSpeedKmh) return; // stationary GPS jitter — ignore
+    if (nowMs - prevMs > kMaxFixGapMs) return; // fixes too far apart in time to bridge
 
     // Cheap pre-filter — skip the crossing math when both fixes are clearly far
     // from the gate midpoint.
@@ -199,6 +213,15 @@ void RaceBoxModel::updateLapTiming(double prevLat, double prevLon, double curLat
     const double t = ((ax - p0x) * sy - (ay - p0y) * sx) / denom; // fraction along the path
     const double u = ((ax - p0x) * ry - (ay - p0y) * rx) / denom; // fraction along the gate
     if (t < 0.0 || t > 1.0 || u < 0.0 || u > 1.0) return;         // crossing is outside the gate width
+
+    // Reject wrong-way crossings. denom's sign is the side the path crosses the gate
+    // from; the first accepted crossing latches the racing direction, and later
+    // opposite-direction passes (reverse, pit-lane side of the line) are ignored.
+    const int dir = (denom > 0.0) ? 1 : -1;
+    if (m_crossDirSign == 0)
+        m_crossDirSign = dir;      // latch on the arming crossing
+    else if (dir != m_crossDirSign)
+        return;                    // crossing the line the wrong way — not a lap
 
     // Sub-sample crossing time: interpolate between the two fix arrival times.
     const qint64 crossMs = prevMs + static_cast<qint64>(t * static_cast<double>(nowMs - prevMs));
@@ -260,6 +283,7 @@ void RaceBoxModel::clearFinishLine()
     m_finishLineSet    = false;
     m_gateLatA = m_gateLonA = m_gateLatB = m_gateLonB = 0.0;
     m_hasStartedTiming = false;
+    m_crossDirSign     = 0;
     m_dirty |= kDirtyFinishLine;
     emit finishLineLearned(0.0, 0.0, 0.0, 0.0);
     qCInfo(lcRaceBox) << "Finish line cleared";

@@ -263,9 +263,22 @@ void TrackModel::loadUserState()
     const QJsonObject finishLines = obj["finishLines"].toObject();
     for (auto it = finishLines.begin(); it != finishLines.end(); ++it) {
         // Value is a flat [lat1, lon1, lat2, lon2] gate (RaceBox "startLine" format).
-        const QJsonArray a = it.value().toArray();
-        if (a.size() < 4)
+        const QJsonValue val = it.value();
+        if (val.isObject()) {
+            // Legacy point+radius circle. A circle carries no crossing direction, so
+            // it can't be converted to an oriented gate — warn instead of silently
+            // dropping it, so the user knows to re-learn this finish line.
+            qCWarning(lcApp) << "Ignoring legacy circle finish line for"
+                             << (it.key().isEmpty() ? QStringLiteral("(global)") : it.key())
+                             << "— re-learn it to store a gate";
             continue;
+        }
+        const QJsonArray a = val.toArray();
+        if (a.size() < 4) {
+            qCWarning(lcApp) << "Ignoring malformed finish line for"
+                             << (it.key().isEmpty() ? QStringLiteral("(global)") : it.key());
+            continue;
+        }
         QVariantMap map;
         map["lat1"] = a[0].toDouble(); map["lon1"] = a[1].toDouble();
         map["lat2"] = a[2].toDouble(); map["lon2"] = a[3].toDouble();
