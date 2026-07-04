@@ -14,11 +14,15 @@ static int lapTicks(int lapIndex)
     return static_cast<int>((kBaseLapS - lapIndex * kLapImprovementS) * kTickHz);
 }
 
-void MockRaceBoxProvider::defaultFinishLine(double &lat, double &lon, double &radiusM)
+void MockRaceBoxProvider::defaultFinishLine(double &latA, double &lonA, double &latB, double &lonB)
 {
-    lat     = kTrackLat + kTrackRadius; // phase=0 position on the circular path
-    lon     = kTrackLon;
-    radiusM = 20.0;
+    // At phase=0 the car sits at (kTrackLat+kTrackRadius, kTrackLon) moving in the
+    // +longitude direction, so a gate spanning the track runs along latitude.
+    const double centerLat = kTrackLat + kTrackRadius;
+    const double centerLon = kTrackLon;
+    const double halfWidthDeg = 15.0 / 111132.0; // ~15 m each side (30 m gate)
+    latA = centerLat + halfWidthDeg; lonA = centerLon;
+    latB = centerLat - halfWidthDeg; lonB = centerLon;
 }
 
 MockRaceBoxProvider::MockRaceBoxProvider(QObject *parent)
@@ -90,9 +94,13 @@ void MockRaceBoxProvider::onTick()
     // Speed: two peaks per lap (two straights), average = kAvgSpeedKmh
     const double kmh      = kAvgSpeedKmh + kSpeedAmplitudeKmh * std::cos(phase * 2.0);
 
-    // Position: circular path — phase=0 puts the vehicle at the finish line
-    d.latitude   = kTrackLat + kTrackRadius * std::cos(phase);
-    d.longitude  = kTrackLon + kTrackRadius * std::sin(phase);
+    // Position: circular path, offset by π so the lap seam (tickInLap wrap) sits at
+    // the bottom of the circle. The car then crosses the finish-line gate cleanly
+    // mid-lap (at the top) — a proper transversal crossing — instead of restarting
+    // on the line, so the gate detector arms early and times several laps per run.
+    const double angle    = phase + M_PI;
+    d.latitude   = kTrackLat + kTrackRadius * std::cos(angle);
+    d.longitude  = kTrackLon + kTrackRadius * std::sin(angle);
     d.speedMmS   = static_cast<qint32>(kmh * kMmSPerKmh);
     // G-forces: lateral in corners, longitudinal under braking/acceleration
     d.gForceXMg  = static_cast<qint16>(-600.0 * std::sin(phase));       // lateral

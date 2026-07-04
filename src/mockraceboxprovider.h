@@ -11,8 +11,9 @@ public:
     void start() override;
     void stop()  override;
 
-    // Returns the finish-line coordinate for this mock track (phase=0 position)
-    static void defaultFinishLine(double &lat, double &lon, double &radiusM);
+    // Returns the finish-line gate (two endpoints A→B) for this mock track,
+    // perpendicular to the circular path at the phase=0 crossing point.
+    static void defaultFinishLine(double &latA, double &lonA, double &latB, double &lonB);
 
 private slots:
     void onTick();

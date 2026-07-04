@@ -15,7 +15,6 @@
 namespace {
 constexpr double kDetectRadiusM = 5000.0;
 constexpr int    kDetectIntervalMs = 5000;
-constexpr double kDefaultFinishRadiusM = 20.0;
 const char *kMockTrackId = "mock-track";
 }
 
@@ -42,9 +41,17 @@ TrackModel::TrackModel(RaceBoxModel *raceBoxModel, bool mockMode, QObject *paren
             m_detectTimer.start();
     });
 
-    loadDatabase();
-    loadUserState();
-    rebuildFiltered();
+    loadUserState(); // cheap; needed by applyStartupFinishLine() before the DB is ready
+
+    // The bundled track DB (~216 KB / ~1500 entries) costs tens of ms to parse and
+    // turn into filtered rows, and only feeds the Tracks browser and the GPS-gated,
+    // self-retrying auto-detect scan — never the first frame. Defer it to the first
+    // event-loop pass so it doesn't stall cold start.
+    QTimer::singleShot(0, this, [this]() {
+        loadDatabase();
+        rebuildFiltered();
+        emit activeTrackChanged(); // active-track name/flags are resolvable now
+    });
 }
 
 void TrackModel::loadDatabase()
@@ -89,9 +96,10 @@ bool TrackModel::loadTracksFromJson(const QByteArray &data)
             continue;
 
         Track t;
-        t.id      = obj["id"].toString();
-        t.name    = obj["name"].toString();
-        t.country = obj["country"].toString();
+        t.id        = obj["id"].toString();
+        t.name      = obj["name"].toString();
+        t.nameLower = t.name.toLower();
+        t.country   = obj["country"].toString();
         t.lat     = c[0].toDouble();
         t.lon     = c[1].toDouble();
         for (const QJsonValue &cfg : obj["configurations"].toArray())
@@ -115,9 +123,10 @@ void TrackModel::injectMockTrackIfNeeded()
             return;
     }
     Track mock;
-    mock.id      = kMockTrackId;
-    mock.name    = "MOCK CIRCUIT (LONDON)";
-    mock.country = "Mock";
+    mock.id        = kMockTrackId;
+    mock.name      = "MOCK CIRCUIT (LONDON)";
+    mock.nameLower = mock.name.toLower();
+    mock.country   = "Mock";
     mock.lat     = 51.5074;
     mock.lon     = -0.1278;
     m_tracks.append(mock);
@@ -132,6 +141,7 @@ void TrackModel::rebuildCountries()
     std::sort(list.begin(), list.end());
     list.prepend("ALL");
     m_countries = list;
+    emit countriesChanged();
 }
 
 const TrackModel::Track *TrackModel::findTrack(const QString &id) const
@@ -141,6 +151,23 @@ const TrackModel::Track *TrackModel::findTrack(const QString &id) const
             return &t;
     }
     return nullptr;
+}
+
+bool TrackModel::emitFinishLineFor(const QString &id)
+{
+    if (!m_finishLines.contains(id))
+        return false;
+    const QVariantMap fl = m_finishLines.value(id);
+    emit applyFinishLine(fl["lat1"].toDouble(), fl["lon1"].toDouble(),
+                         fl["lat2"].toDouble(), fl["lon2"].toDouble());
+    return true;
+}
+
+QVariantMap TrackModel::finishLineFor(const QString &trackId) const
+{
+    if (m_finishLines.contains(trackId))
+        return m_finishLines.value(trackId);
+    return m_finishLines.value(QString()); // global fallback ({} if none)
 }
 
 QString TrackModel::activeTrackName() const
@@ -180,7 +207,7 @@ void TrackModel::rebuildFiltered()
     for (const Track &t : m_tracks) {
         if (m_countryFilter != "ALL" && t.country != m_countryFilter)
             continue;
-        if (!needle.isEmpty() && !t.name.toLower().contains(needle))
+        if (!needle.isEmpty() && !t.nameLower.contains(needle))
             continue;
         matched.append(t);
     }
@@ -235,11 +262,13 @@ void TrackModel::loadUserState()
 
     const QJsonObject finishLines = obj["finishLines"].toObject();
     for (auto it = finishLines.begin(); it != finishLines.end(); ++it) {
-        const QJsonObject fl = it.value().toObject();
+        // Value is a flat [lat1, lon1, lat2, lon2] gate (RaceBox "startLine" format).
+        const QJsonArray a = it.value().toArray();
+        if (a.size() < 4)
+            continue;
         QVariantMap map;
-        map["lat"]     = fl["lat"].toDouble();
-        map["lon"]     = fl["lon"].toDouble();
-        map["radiusM"] = fl["radiusM"].toDouble(kDefaultFinishRadiusM);
+        map["lat1"] = a[0].toDouble(); map["lon1"] = a[1].toDouble();
+        map["lat2"] = a[2].toDouble(); map["lon2"] = a[3].toDouble();
         m_finishLines[it.key()] = map;
     }
 
@@ -260,11 +289,10 @@ void TrackModel::persistUserState()
 
     QJsonObject flObj;
     for (auto it = m_finishLines.constBegin(); it != m_finishLines.constEnd(); ++it) {
-        QJsonObject fl;
-        fl["lat"]     = it.value()["lat"].toDouble();
-        fl["lon"]     = it.value()["lon"].toDouble();
-        fl["radiusM"] = it.value()["radiusM"].toDouble();
-        flObj[it.key()] = fl;
+        const QVariantMap &m = it.value();
+        const QJsonArray a { m["lat1"].toDouble(), m["lon1"].toDouble(),
+                             m["lat2"].toDouble(), m["lon2"].toDouble() };
+        flObj[it.key()] = a;
     }
     obj["finishLines"] = flObj;
 
@@ -299,12 +327,9 @@ void TrackModel::selectTrack(const QString &id)
 
     setActiveTrack(id, false);
 
-    if (m_finishLines.contains(id)) {
-        const QVariantMap fl = m_finishLines.value(id);
-        emit applyFinishLine(fl["lat"].toDouble(), fl["lon"].toDouble(), fl["radiusM"].toDouble());
-    } else {
+    // Prefer the track's own finish line, else the global one, else clear.
+    if (!emitFinishLineFor(id) && !emitFinishLineFor(QString()))
         emit clearFinishLineRequested();
-    }
 }
 
 void TrackModel::clearActiveTrack()
@@ -375,11 +400,10 @@ void TrackModel::acceptSuggestedTrack()
 
     setActiveTrack(id, true);
 
-    if (m_finishLines.contains(id)) {
-        const QVariantMap fl = m_finishLines.value(id);
-        emit applyFinishLine(fl["lat"].toDouble(), fl["lon"].toDouble(), fl["radiusM"].toDouble());
-    }
-    // else: leave the current finish line untouched (global/mock fallback stays active)
+    // Prefer the track's own finish line, else the global one. If neither exists,
+    // leave the current finish line untouched (mock fallback stays active).
+    if (!emitFinishLineFor(id))
+        emitFinishLineFor(QString());
 }
 
 void TrackModel::dismissSuggestedTrack()
@@ -395,12 +419,11 @@ void TrackModel::dismissSuggestedTrack()
         m_detectTimer.start();
 }
 
-void TrackModel::onFinishLineLearned(double lat, double lon)
+void TrackModel::onFinishLineLearned(double latA, double lonA, double latB, double lonB)
 {
-    if (m_activeTrackId.isEmpty())
-        return; // no active track — global DashConfig fallback handles this independently
-
-    if (lat == 0.0 && lon == 0.0) {
+    // Keyed by active track id; the empty id ("no track active") holds the
+    // global finish line. This is the single persistence path for both cases.
+    if (latA == 0.0 && lonA == 0.0 && latB == 0.0 && lonB == 0.0) {
         if (m_finishLines.remove(m_activeTrackId) > 0) {
             persistUserState();
             emit activeTrackChanged();
@@ -410,9 +433,8 @@ void TrackModel::onFinishLineLearned(double lat, double lon)
     }
 
     QVariantMap fl;
-    fl["lat"]     = lat;
-    fl["lon"]     = lon;
-    fl["radiusM"] = kDefaultFinishRadiusM;
+    fl["lat1"] = latA; fl["lon1"] = lonA;
+    fl["lat2"] = latB; fl["lon2"] = lonB;
     m_finishLines[m_activeTrackId] = fl;
     persistUserState();
     emit activeTrackChanged();
@@ -421,11 +443,14 @@ void TrackModel::onFinishLineLearned(double lat, double lon)
 
 void TrackModel::applyStartupFinishLine()
 {
-    if (m_activeTrackId.isEmpty() || !m_finishLines.contains(m_activeTrackId))
+    // Active track's own line takes precedence; fall back to the global one.
+    if (emitFinishLineFor(m_activeTrackId)) {
+        qCInfo(lcApp) << "Applied stored finish line for"
+                      << (m_activeTrackId.isEmpty() ? QStringLiteral("(no track)") : activeTrackName());
         return;
-    const QVariantMap fl = m_finishLines.value(m_activeTrackId);
-    emit applyFinishLine(fl["lat"].toDouble(), fl["lon"].toDouble(), fl["radiusM"].toDouble());
-    qCInfo(lcApp) << "Applied stored per-track finish line for" << activeTrackName();
+    }
+    if (!m_activeTrackId.isEmpty() && emitFinishLineFor(QString()))
+        qCInfo(lcApp) << "Applied global finish line (no per-track line for" << activeTrackName() << ")";
 }
 
 void TrackModel::refreshDatabase()

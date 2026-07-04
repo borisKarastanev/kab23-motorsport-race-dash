@@ -16,7 +16,7 @@ class QNetworkAccessManager;
 
 class TrackModel : public QObject {
     Q_OBJECT
-    Q_PROPERTY(QStringList countries READ countries CONSTANT)
+    Q_PROPERTY(QStringList countries READ countries NOTIFY countriesChanged)
     Q_PROPERTY(QVariantList filteredTracks READ filteredTracks NOTIFY filteredTracksChanged)
     Q_PROPERTY(QString searchText READ searchText WRITE setSearchText NOTIFY filtersChanged)
     Q_PROPERTY(QString countryFilter READ countryFilter WRITE setCountryFilter NOTIFY filtersChanged)
@@ -54,23 +54,30 @@ public:
     Q_INVOKABLE void dismissSuggestedTrack();
     Q_INVOKABLE void refreshDatabase();
 
+    // Effective finish line for a track id: the track's own stored gate, or the
+    // global (no-track) gate as a fallback. Empty map if neither exists.
+    // Keys: "lat1", "lon1", "lat2", "lon2" (gate endpoints). Used by the session map.
+    Q_INVOKABLE QVariantMap finishLineFor(const QString &trackId) const;
+
     // Called once from main.cpp after signal wiring: applies the persisted
-    // active track's stored finish line, if any (overrides the global one
-    // loaded from dashconfig).
+    // finish line for the active track, or the global one if no track is
+    // active / the active track has none.
     void applyStartupFinishLine();
 
 public slots:
-    // Connected in main.cpp to RaceBoxModel::finishLineLearned
-    void onFinishLineLearned(double lat, double lon);
+    // Connected in main.cpp to RaceBoxModel::finishLineLearned. Coordinates are
+    // the two endpoints of the finish-line gate (all zero clears it).
+    void onFinishLineLearned(double latA, double lonA, double latB, double lonB);
 
 signals:
+    void countriesChanged();
     void filteredTracksChanged();
     void filtersChanged();
     void activeTrackChanged();
     void trackSuggestionChanged();
     void refreshStateChanged();
-    // Connected in main.cpp to RaceBoxModel::setFinishLine
-    void applyFinishLine(double lat, double lon, double radiusM);
+    // Connected in main.cpp to RaceBoxModel::setFinishLine — the gate endpoints A→B
+    void applyFinishLine(double latA, double lonA, double latB, double lonB);
     // Connected in main.cpp to RaceBoxModel::clearFinishLine
     void clearFinishLineRequested();
 
@@ -79,7 +86,7 @@ private slots:
 
 private:
     struct Track {
-        QString id, name, country;
+        QString id, name, nameLower, country;
         double lat = 0.0, lon = 0.0;
         QStringList configs;
     };
@@ -93,6 +100,9 @@ private:
     void rebuildFiltered();
     void setActiveTrack(const QString &id, bool autoDetected);
     const Track *findTrack(const QString &id) const;
+    // Emits applyFinishLine for the stored finish line of id, if any.
+    // Returns true if a finish line was emitted.
+    bool emitFinishLineFor(const QString &id);
     static QString userStatePath();
     static QString dbOverridePath();
 
@@ -103,7 +113,11 @@ private:
     QStringList m_countries;
 
     QSet<QString> m_favorites;
-    QHash<QString, QVariantMap> m_finishLines; // id -> {lat, lon, radiusM}
+    // Track id -> {lat1, lon1, lat2, lon2} gate endpoints. The empty-string key
+    // holds the global finish line used when no track is active. Single owner of
+    // all finish lines. Persisted as a flat [lat1,lon1,lat2,lon2] "startLine"
+    // array (matching the RaceBox export format for easy manual entry).
+    QHash<QString, QVariantMap> m_finishLines;
     QSet<QString> m_dismissedThisRun;
 
     QString m_searchText;

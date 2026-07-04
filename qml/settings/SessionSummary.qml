@@ -9,6 +9,9 @@ Item {
     readonly property var lapMs: payload.lapMs || []
     readonly property var lapPaths: payload.lapPaths || []
 
+    // Finish line for this session's track (falls back to the global line).
+    readonly property var finishLine: trackModel.finishLineFor(payload.trackId || "")
+
     readonly property int bestLapMs: {
         if (lapMs.length === 0) return 0
         return Math.min(...lapMs)
@@ -119,8 +122,10 @@ Item {
                 Layout.preferredWidth: 1
                 path: (selectedLapIndex >= 0 && selectedLapIndex < lapPaths.length)
                       ? lapPaths[selectedLapIndex] : []
-                finishLat: dashConfig.finishLineLat
-                finishLon: dashConfig.finishLineLon
+                finishLat1: finishLine.lat1 || 0
+                finishLon1: finishLine.lon1 || 0
+                finishLat2: finishLine.lat2 || 0
+                finishLon2: finishLine.lon2 || 0
             }
         }
 

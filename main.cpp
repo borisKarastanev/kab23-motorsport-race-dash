@@ -1,6 +1,7 @@
 #include <QGuiApplication>
 #include <QQmlApplicationEngine>
 #include <QQmlContext>
+#include <QQmlEngine>
 #include <QMetaType>
 #include <QCommandLineParser>
 #include <QCursor>
@@ -25,6 +26,11 @@ int main(int argc, char *argv[])
     qRegisterMetaType<QCanBusFrame>("QCanBusFrame");
     qRegisterMetaType<RaceBoxData>("RaceBoxData");
 
+    // Expose RaceBoxModel's enums (e.g. LapTimerState) to QML as `RaceBox.Armed`
+    // etc. Uncreatable: QML references the enum values, not instances.
+    qmlRegisterUncreatableMetaObject(RaceBoxModel::staticMetaObject, "RaceDash", 1, 0,
+                                     "RaceBox", "Enum access only");
+
     QCommandLineParser parser;
     parser.addOption({"mock",  "Use mock providers (no hardware required)"});
     parser.addOption({"kiosk", "Fullscreen kiosk mode: hide cursor, fill display"});
@@ -45,20 +51,14 @@ int main(int argc, char *argv[])
     TrackModel    trackModel(&raceBoxModel, useMock);
     SessionModel  sessionModel(&dataModel, &raceBoxModel, &trackModel);
 
+    // Real-mode finish lines are owned by TrackModel and applied below via
+    // applyStartupFinishLine(). Mock mode seeds a synthetic line so laps time
+    // out of the box.
     if (useMock) {
-        double flLat, flLon, flRadius;
-        MockRaceBoxProvider::defaultFinishLine(flLat, flLon, flRadius);
-        raceBoxModel.setFinishLine(flLat, flLon, flRadius);
-        qCInfo(lcApp) << "Mock finish line loaded";
-    } else {
-        raceBoxModel.setFinishLine(dashConfig.finishLineLat(),
-                                   dashConfig.finishLineLon(),
-                                   dashConfig.finishLineRadiusM());
-        if (dashConfig.finishLineLat() != 0.0 || dashConfig.finishLineLon() != 0.0)
-            qCInfo(lcApp) << "Finish line loaded from config:"
-                          << dashConfig.finishLineLat() << dashConfig.finishLineLon();
-        else
-            qCInfo(lcApp) << "No finish line in config — tap SET FINISH LINE on track";
+        double latA, lonA, latB, lonB;
+        MockRaceBoxProvider::defaultFinishLine(latA, lonA, latB, lonB);
+        raceBoxModel.setFinishLine(latA, lonA, latB, lonB);
+        qCInfo(lcApp) << "Mock finish-line gate loaded";
     }
 
     // CAN provider
@@ -89,14 +89,12 @@ int main(int argc, char *argv[])
                      Qt::QueuedConnection);
     QObject::connect(&raceBoxModel, &RaceBoxModel::speedKmhChanged,
                      &dataModel, &CanDataModel::setSpeed);
-    QObject::connect(&raceBoxModel, &RaceBoxModel::finishLineLearned,
-                     &dashConfig, &DashConfig::saveFinishLine);
     QObject::connect(&sessionModel, &SessionModel::sessionSaved,
                      &raceBoxModel, &RaceBoxModel::resetLapCounters);
 
-    // Track preselection — global DashConfig finish line above stays as the
-    // no-track fallback; TrackModel additionally remembers a finish line per
-    // track id and overrides the global one whenever a track is active.
+    // TrackModel is the single owner of finish lines: it stores one per track id
+    // plus a global (no-track) line, persists them to tracks-user.json, and
+    // applies the right one to RaceBoxModel on selection / startup.
     QObject::connect(&raceBoxModel, &RaceBoxModel::finishLineLearned,
                      &trackModel, &TrackModel::onFinishLineLearned);
     QObject::connect(&trackModel, &TrackModel::applyFinishLine,

@@ -2,11 +2,36 @@
 #include "logging.h"
 #include <cmath>
 
-static constexpr double kEarthRadiusM = 6371000.0;
+static constexpr double kEarthRadiusM   = 6371000.0;
+static constexpr double kMetersPerDegLat = 111132.0;
+
+namespace {
+constexpr double kMinCrossSpeedKmh    = 10.0;  // ignore crossings while crawling (pit)
+constexpr qint64 kMinLapMs            = 3000;  // debounce: reject re-crossings within 3 s
+constexpr double kLearnGateHalfWidthM = 12.0;  // learned gate spans 24 m across the track
+constexpr double kGatePrefilterM      = 250.0; // skip crossing math when clearly far away
+
+// Metres per degree of longitude at the given latitude.
+double metersPerDegLon(double latDeg)
+{
+    return 111320.0 * std::cos(latDeg * M_PI / 180.0);
+}
+
+// Initial bearing (radians, 0 = north, clockwise) from point 1 to point 2.
+double bearingRad(double lat1, double lon1, double lat2, double lon2)
+{
+    const double la1 = lat1 * M_PI / 180.0, la2 = lat2 * M_PI / 180.0;
+    const double dLon = (lon2 - lon1) * M_PI / 180.0;
+    const double y = std::sin(dLon) * std::cos(la2);
+    const double x = std::cos(la1) * std::sin(la2) - std::sin(la1) * std::cos(la2) * std::cos(dLon);
+    return std::atan2(y, x);
+}
+}
 
 RaceBoxModel::RaceBoxModel(QObject *parent)
     : QObject(parent)
 {
+    m_clock.start();
     m_notifyTimer.setInterval(100); // 10 Hz
     connect(&m_notifyTimer, &QTimer::timeout, this, &RaceBoxModel::emitNotifications);
     m_notifyTimer.start();
@@ -15,25 +40,50 @@ RaceBoxModel::RaceBoxModel(QObject *parent)
 qint64 RaceBoxModel::currentLapMs() const
 {
     if (!m_lapTimerRunning) return 0;
-    return m_lapTimer.elapsed();
+    return m_clock.elapsed() - m_lapStartMs;
 }
 
-void RaceBoxModel::setFinishLine(double lat, double lon, double radiusM)
+RaceBoxModel::LapTimerState RaceBoxModel::lapTimerState() const
 {
-    if (lat == 0.0 && lon == 0.0) return; // unset
-    m_finishLineLat  = lat;
-    m_finishLineLon  = lon;
-    m_finishRadiusM  = radiusM;
-    m_finishLineSet  = true;
+    if (m_lapTimerRunning)              return Running;
+    if (!m_finishLineSet || !m_hasFix)  return Idle;
+    return m_hasStartedTiming ? Standby : Armed;
+}
+
+void RaceBoxModel::setFinishLine(double latA, double lonA, double latB, double lonB)
+{
+    if (latA == 0.0 && lonA == 0.0 && latB == 0.0 && lonB == 0.0) return; // unset
+    m_gateLatA = latA; m_gateLonA = lonA;
+    m_gateLatB = latB; m_gateLonB = lonB;
+    m_finishLineSet = true;
     m_dirty |= kDirtyFinishLine;
+}
+
+void RaceBoxModel::gateFromHeading(double lat, double lon,
+                                   double &latA, double &lonA, double &latB, double &lonB) const
+{
+    // Perpendicular to the recent heading; falls back to a N–S gate if we haven't
+    // seen movement yet (e.g. finish line set while stationary — re-learn while
+    // rolling for a correctly-oriented gate).
+    const double hdg = m_haveHeading ? m_headingRad : 0.0;
+    // Travel unit vector in ENU is (sin hdg, cos hdg); its perpendicular is (cos hdg, -sin hdg).
+    const double perpE = std::cos(hdg);
+    const double perpN = -std::sin(hdg);
+    const double dLat = (kLearnGateHalfWidthM * perpN) / kMetersPerDegLat;
+    const double dLon = (kLearnGateHalfWidthM * perpE) / metersPerDegLon(lat);
+    latA = lat + dLat; lonA = lon + dLon;
+    latB = lat - dLat; lonB = lon - dLon;
 }
 
 void RaceBoxModel::learnFinishLineHere()
 {
     if (!m_hasFix) return;
-    setFinishLine(m_lastLat, m_lastLon, m_finishRadiusM);
-    qCInfo(lcRaceBox) << "Finish line set at" << m_lastLat << m_lastLon;
-    emit finishLineLearned(m_lastLat, m_lastLon);
+    double latA, lonA, latB, lonB;
+    gateFromHeading(m_lastLat, m_lastLon, latA, lonA, latB, lonB);
+    setFinishLine(latA, lonA, latB, lonB);
+    qCInfo(lcRaceBox) << "Finish-line gate set at" << m_lastLat << m_lastLon
+                      << "| endpoints" << latA << lonA << "->" << latB << lonB;
+    emit finishLineLearned(latA, lonA, latB, lonB);
 }
 
 void RaceBoxModel::onConnectionStateChanged(bool connected)
@@ -43,6 +93,7 @@ void RaceBoxModel::onConnectionStateChanged(bool connected)
     m_dirty |= kDirtyConnected;
     if (!connected) {
         m_hasFix = false;
+        m_havePrevFix = false; // stale previous fix must not bridge a reconnect
         m_dirty |= kDirtyFix;
     }
 }
@@ -53,10 +104,12 @@ void RaceBoxModel::onData(const RaceBoxData &d)
     if (m_hasFix != fix) {
         m_hasFix = fix;
         m_dirty |= kDirtyFix;
-        if (fix)
+        if (fix) {
             qCInfo(lcRaceBox) << "GPS fix acquired — SVs:" << d.numSvs;
-        else
+        } else {
             qCInfo(lcRaceBox) << "GPS fix lost";
+            m_havePrevFix = false; // don't bridge a dropout into a false crossing
+        }
     }
 
     if (m_satellites != d.numSvs) { m_satellites = d.numSvs; m_dirty |= kDirtySvs; }
@@ -78,9 +131,23 @@ void RaceBoxModel::onData(const RaceBoxData &d)
     if (kmhInt != m_speedKmh) { m_speedKmh = kmhInt; emit speedKmhChanged(kmhInt); }
 
     if (fix) {
-        m_lastLat = d.latitude;
-        m_lastLon = d.longitude;
-        updateLapTiming(d.latitude, d.longitude, static_cast<double>(kmhInt));
+        const double curLat = d.latitude, curLon = d.longitude;
+        const qint64 nowMs  = m_clock.elapsed();
+
+        if (m_havePrevFix) {
+            // Refresh the travel heading when the car has moved appreciably.
+            if (haversineM(m_lastLat, m_lastLon, curLat, curLon) > 0.5) {
+                m_headingRad  = bearingRad(m_lastLat, m_lastLon, curLat, curLon);
+                m_haveHeading = true;
+            }
+            updateLapTiming(m_lastLat, m_lastLon, curLat, curLon,
+                            static_cast<double>(kmhInt), m_prevFixMs, nowMs);
+        }
+
+        m_lastLat = curLat;
+        m_lastLon = curLon;
+        m_prevFixMs   = nowMs;
+        m_havePrevFix = true;
 
         if (m_lapTimerRunning) {
             static constexpr double kMinPointSpacingM = 2.0;
@@ -98,57 +165,73 @@ void RaceBoxModel::onData(const RaceBoxData &d)
     if (m_lapTimerRunning) m_dirty |= kDirtyCurrentLap;
 }
 
-void RaceBoxModel::updateLapTiming(double lat, double lon, double speedKmh)
+void RaceBoxModel::updateLapTiming(double prevLat, double prevLon, double curLat, double curLon,
+                                  double speedKmh, qint64 prevMs, qint64 nowMs)
 {
     if (!m_finishLineSet) return;
+    if (speedKmh <= kMinCrossSpeedKmh) return; // crawling — ignore (pit lane etc.)
 
-    // Cheap rectangular pre-filter — skip haversine when clearly far from the line
-    static constexpr double kDegGuard = 0.002; // ~220 m at mid-latitudes
-    if (!m_inFinishZone
-        && std::abs(lat - m_finishLineLat) > kDegGuard
-        && std::abs(lon - m_finishLineLon) > kDegGuard)
+    // Cheap pre-filter — skip the crossing math when both fixes are clearly far
+    // from the gate midpoint.
+    const double midLat = (m_gateLatA + m_gateLatB) / 2.0;
+    const double midLon = (m_gateLonA + m_gateLonB) / 2.0;
+    if (haversineM(curLat,  curLon,  midLat, midLon) > kGatePrefilterM &&
+        haversineM(prevLat, prevLon, midLat, midLon) > kGatePrefilterM)
         return;
 
-    const double dist = haversineM(lat, lon, m_finishLineLat, m_finishLineLon);
-    const bool inZone = dist <= m_finishRadiusM;
+    // Project everything to local metres (equirectangular around the gate midpoint):
+    // x = east, y = north.
+    const double mLon = metersPerDegLon(midLat);
+    auto ex = [&](double lon) { return (lon - midLon) * mLon; };
+    auto ny = [&](double lat) { return (lat - midLat) * kMetersPerDegLat; };
 
-    if (inZone && !m_inFinishZone && speedKmh > 10.0) {
-        // Entered the finish zone at speed — record lap if timer already running
-        if (m_lapTimerRunning && m_lapNumber > 0) {
-            const qint64 lapMs = m_lapTimer.elapsed();
-            m_lastLapMs = lapMs;
-            m_dirty |= kDirtyLastLap;
-            QVariantList pathList;
-            pathList.reserve(m_currentLapPath.size());
-            for (double v : m_currentLapPath)
-                pathList.append(v);
-            emit lapCompleted(lapMs, pathList);
-            m_currentLapPath.clear();
-            const bool newBest = (m_bestLapMs == 0 || lapMs < m_bestLapMs);
-            if (newBest) {
-                m_bestLapMs = lapMs;
-                m_dirty |= kDirtyBestLap;
-            }
-            qCInfo(lcRaceBox) << "Lap" << m_lapNumber << "completed:"
-                              << lapMs / 60000 << "m"
-                              << (lapMs % 60000) / 1000.0 << "s"
-                              << (newBest ? "(new best)" : "");
+    const double p0x = ex(prevLon), p0y = ny(prevLat); // path segment start (prev fix)
+    const double p1x = ex(curLon),  p1y = ny(curLat);  // path segment end   (cur fix)
+    const double ax  = ex(m_gateLonA), ay = ny(m_gateLatA); // gate endpoint A
+    const double bx  = ex(m_gateLonB), by = ny(m_gateLatB); // gate endpoint B
+
+    // Intersect path segment P0→P1 with gate segment A→B.
+    const double rx = p1x - p0x, ry = p1y - p0y;
+    const double sx = bx  - ax,  sy = by  - ay;
+    const double denom = rx * sy - ry * sx;
+    if (std::abs(denom) < 1e-9) return; // parallel / degenerate — no crossing
+
+    const double t = ((ax - p0x) * sy - (ay - p0y) * sx) / denom; // fraction along the path
+    const double u = ((ax - p0x) * ry - (ay - p0y) * rx) / denom; // fraction along the gate
+    if (t < 0.0 || t > 1.0 || u < 0.0 || u > 1.0) return;         // crossing is outside the gate width
+
+    // Sub-sample crossing time: interpolate between the two fix arrival times.
+    const qint64 crossMs = prevMs + static_cast<qint64>(t * static_cast<double>(nowMs - prevMs));
+
+    // Debounce: reject a second crossing that arrives implausibly soon (GPS jitter
+    // straddling the line on consecutive fixes).
+    if (m_lapTimerRunning && (crossMs - m_lapStartMs) < kMinLapMs) return;
+
+    if (m_lapTimerRunning && m_lapNumber > 0) {
+        const qint64 lapMs = crossMs - m_lapStartMs;
+        m_lastLapMs = lapMs;
+        m_dirty |= kDirtyLastLap;
+        QVariantList pathList;
+        pathList.reserve(m_currentLapPath.size());
+        for (double v : m_currentLapPath)
+            pathList.append(v);
+        emit lapCompleted(lapMs, pathList);
+        m_currentLapPath.clear();
+        const bool newBest = (m_bestLapMs == 0 || lapMs < m_bestLapMs);
+        if (newBest) {
+            m_bestLapMs = lapMs;
+            m_dirty |= kDirtyBestLap;
         }
-        ++m_lapNumber;
-        m_dirty |= kDirtyLapNumber;
-        m_lapTimer.restart();
-        m_lapTimerRunning = true;
-        if (!m_hasStartedTiming) {
-            m_hasStartedTiming = true;
-            m_dirty |= kDirtyStartedTiming;
-        }
+        qCInfo(lcRaceBox) << "Lap" << m_lapNumber << "completed:"
+                          << lapMs / 60000 << "m"
+                          << (lapMs % 60000) / 1000.0 << "s"
+                          << (newBest ? "(new best)" : "");
     }
-
-    // Hysteresis: enter at 1× radius, exit at 2× radius
-    if (inZone)
-        m_inFinishZone = true;
-    else if (dist > m_finishRadiusM * 2.0)
-        m_inFinishZone = false;
+    ++m_lapNumber;
+    m_dirty |= kDirtyLapNumber;
+    m_lapStartMs = crossMs;
+    m_lapTimerRunning = true;
+    m_hasStartedTiming = true; // sticky; lapTimerState() transitions handled at notify time
 }
 
 double RaceBoxModel::haversineM(double lat1, double lon1, double lat2, double lon2)
@@ -163,7 +246,6 @@ double RaceBoxModel::haversineM(double lat1, double lon1, double lat2, double lo
 
 void RaceBoxModel::resetLapState()
 {
-    m_inFinishZone    = false;
     m_lapTimerRunning = false;
     m_lapNumber       = 0;
     m_lastLapMs       = 0;
@@ -176,11 +258,10 @@ void RaceBoxModel::clearFinishLine()
 {
     resetLapState();
     m_finishLineSet    = false;
-    m_finishLineLat    = 0.0;
-    m_finishLineLon    = 0.0;
+    m_gateLatA = m_gateLonA = m_gateLatB = m_gateLonB = 0.0;
     m_hasStartedTiming = false;
-    m_dirty |= kDirtyFinishLine | kDirtyStartedTiming;
-    emit finishLineLearned(0.0, 0.0);
+    m_dirty |= kDirtyFinishLine;
+    emit finishLineLearned(0.0, 0.0, 0.0, 0.0);
     qCInfo(lcRaceBox) << "Finish line cleared";
 }
 
@@ -208,5 +289,13 @@ void RaceBoxModel::emitNotifications()
     if (dirty & kDirtyBattery)    emit batteryPercentChanged();
     if (dirty & kDirtyCharging)   emit batteryChargingChanged();
     if (dirty & kDirtyFinishLine) emit finishLineSetChanged();
-    if (dirty & kDirtyStartedTiming) emit hasStartedTimingChanged();
+
+    // Derived lap-timer state: recompute once per tick and notify on transition.
+    // Every state-input change also sets a dirty bit above, so a real transition
+    // never slips past the early-return guard.
+    const LapTimerState state = lapTimerState();
+    if (state != m_lastLapTimerState) {
+        m_lastLapTimerState = state;
+        emit lapTimerStateChanged();
+    }
 }

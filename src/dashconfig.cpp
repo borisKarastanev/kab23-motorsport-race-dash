@@ -80,12 +80,9 @@ static void writeDefaultConfig(const QString &path)
         "[RaceBox]\n"
         "\n"
         "# BLE device name prefix — must match the start of the RaceBox Mini device name\n"
-        "DeviceName = RaceBox Mini\n"
-        "\n"
-        "# Virtual start/finish line (set to 0.0 / 0.0 to auto-learn on first lap button press)\n"
-        "FinishLine.Latitude  = 0.0\n"
-        "FinishLine.Longitude = 0.0\n"
-        "FinishLine.RadiusM   = 20\n";
+        "DeviceName = RaceBox Mini\n";
+    // Finish lines (global + per-track) are owned by TrackModel and persisted
+    // in tracks-user.json — not configured here.
 }
 
 DashConfig::DashConfig(QObject *parent) : QObject(parent)
@@ -123,20 +120,6 @@ DashConfig::DashConfig(QObject *parent) : QObject(parent)
     s.endGroup();
 
     s.beginGroup("RaceBox");
-    m_raceBoxDeviceName  = s.value("DeviceName",           m_raceBoxDeviceName).toString();
-    m_finishLineLat      = s.value("FinishLine.Latitude",  m_finishLineLat).toDouble();
-    m_finishLineLon      = s.value("FinishLine.Longitude", m_finishLineLon).toDouble();
-    m_finishLineRadiusM  = s.value("FinishLine.RadiusM",   m_finishLineRadiusM).toDouble();
-    s.endGroup();
-}
-
-void DashConfig::saveFinishLine(double lat, double lon)
-{
-    // QSettings loads the full file on construction, so existing keys are preserved.
-    // Calling setValue() and letting it sync on destruction updates only these two entries.
-    QSettings s(configPath(), QSettings::IniFormat);
-    s.beginGroup("RaceBox");
-    s.setValue("FinishLine.Latitude",  lat);
-    s.setValue("FinishLine.Longitude", lon);
+    m_raceBoxDeviceName  = s.value("DeviceName", m_raceBoxDeviceName).toString();
     s.endGroup();
 }

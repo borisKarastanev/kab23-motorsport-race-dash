@@ -1,5 +1,6 @@
 import QtQuick 2.15
 import QtQuick.Layouts 1.15
+import RaceDash 1.0
 import "TimeFormat.js" as Fmt
 
 Rectangle {
@@ -118,11 +119,11 @@ Rectangle {
         }
     }
 
-    // Waiting overlay — pulsing prompt shown only on the true first crossing of
-    // this app run; a later reset (Save Session) shows plain "--:--" instead.
+    // Waiting overlay — pulsing prompt shown only while the timer is Armed (first
+    // crossing of this run). After a Save Session reset the state is Standby, so
+    // the prompt stays hidden and the panel shows plain "--:--" instead.
     Rectangle {
-        visible: raceBoxModel.finishLineSet && raceBoxModel.lapNumber === 0 && raceBoxModel.hasFix
-                 && !raceBoxModel.hasStartedTiming
+        visible: raceBoxModel.lapTimerState === RaceBox.Armed
         anchors.fill: parent
         color: parent.color
         radius: parent.radius

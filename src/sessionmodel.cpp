@@ -11,6 +11,12 @@
 #include <QJsonObject>
 #include <QDateTime>
 
+namespace {
+// Max speed (km/h) at which a session may be saved — must be stationary/crawling
+// so the driver isn't tapping SAVE mid-lap.
+constexpr int kSaveMaxSpeedKmh = 5;
+}
+
 QString SessionModel::sessionsPath()
 {
     return QCoreApplication::applicationDirPath() + "/sessions.json";
@@ -43,8 +49,10 @@ void SessionModel::onLapCompleted(qint64 ms, const QVariantList &path)
     m_currentLapTimes.append(ms);
     m_currentLapPaths.append(path);
     qCInfo(lcApp) << "[SessionModel] lap appended —" << ms << "ms | total laps:" << m_currentLapTimes.size();
-    if (wasEmpty)
+    if (wasEmpty) {
         emit hasLapsChanged();
+        updateCanSave();
+    }
 }
 
 void SessionModel::onSpeedChanged()
@@ -52,6 +60,16 @@ void SessionModel::onSpeedChanged()
     const int spd = m_canModel->speed();
     if (spd > m_topSpeedKmh)
         m_topSpeedKmh = spd;
+    updateCanSave();
+}
+
+void SessionModel::updateCanSave()
+{
+    const bool v = hasLaps() && m_canModel->speed() <= kSaveMaxSpeedKmh;
+    if (v != m_canSave) {
+        m_canSave = v;
+        emit canSaveChanged();
+    }
 }
 
 void SessionModel::onOilTempChanged()
@@ -77,7 +95,7 @@ void SessionModel::saveCurrentSession()
 
     QJsonArray lapArray;
     for (qint64 ms : m_currentLapTimes)
-        lapArray.append(static_cast<qint64>(ms));
+        lapArray.append(ms);
 
     QJsonArray pathsArray;
     for (const QVariantList &path : m_currentLapPaths) {
@@ -100,6 +118,7 @@ void SessionModel::saveCurrentSession()
 
     // Prepend to keep newest-first order
     m_sessions.prepend(record.toVariantMap());
+    rebuildSessionGroups();
     persist();
     emit sessionsChanged();
 
@@ -110,6 +129,7 @@ void SessionModel::saveCurrentSession()
     m_maxOilC     = 0.0;
     m_maxCoolantC = 0.0;
     emit hasLapsChanged();
+    updateCanSave();
 
     // Let listeners (RaceBoxModel, via main.cpp) know a session was persisted
     // so lap numbering/timing can start fresh from the next finish-line
@@ -121,7 +141,7 @@ void SessionModel::saveCurrentSession()
                   << "| top speed:" << m_topSpeedKmh << "km/h";
 }
 
-QVariantList SessionModel::sessionGroups() const
+void SessionModel::rebuildSessionGroups()
 {
     // m_sessions is already newest-first (prepend on save); iterating in that
     // order and creating a group on first encounter keeps the group list
@@ -155,7 +175,7 @@ QVariantList SessionModel::sessionGroups() const
         group["sessions"] = groupSessions.value(key);
         result.append(group);
     }
-    return result;
+    m_sessionGroups = result;
 }
 
 void SessionModel::load()
@@ -206,6 +226,7 @@ void SessionModel::load()
         m_sessions.append(map);
     }
 
+    rebuildSessionGroups();
     qCInfo(lcApp) << "Loaded" << m_sessions.size() << "session(s) from sessions.json";
 }
 

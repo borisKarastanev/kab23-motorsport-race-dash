@@ -89,14 +89,14 @@ Rectangle {
         // Save Session button — visible only when stationary and laps have been recorded
         Rectangle {
             id: saveSessionBtn
-            visible: sessionModel.hasLaps && dataModel.speed <= 5
+            visible: sessionModel.canSave
             height: 20
             width: saveSessionLabel.width + 16
             color: saveSessionArea.pressed ? "#111122" : "transparent"
             border.color: "#2a2a4a"
             border.width: 1
             radius: 2
-            anchors.verticalCenter: parent.verticalCenter
+            Layout.alignment: Qt.AlignVCenter
             onVisibleChanged: if (!visible) saveFlashTimer.stop()
 
             Text {
@@ -136,7 +136,7 @@ Rectangle {
                         :                              "#222222"
             border.width: 1
             radius: 2
-            anchors.verticalCenter: parent.verticalCenter
+            Layout.alignment: Qt.AlignVCenter
 
             Text {
                 id: finishLineLabel

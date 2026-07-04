@@ -9,6 +9,17 @@
 
 class RaceBoxModel : public QObject {
     Q_OBJECT
+public:
+    // Lap-timer lifecycle — the single state the UI binds to instead of
+    // deriving it from a handful of loose booleans.
+    //   Idle    — no finish line / no GPS fix: timing unavailable
+    //   Armed   — finish line + fix, waiting for the first crossing (prompt shown)
+    //   Running — a lap is being timed
+    //   Standby — timed before this run (e.g. after a session save), waiting for
+    //             the next crossing without re-showing the first-run prompt
+    enum LapTimerState { Idle, Armed, Running, Standby };
+    Q_ENUM(LapTimerState)
+
     Q_PROPERTY(bool    connected      READ connected      NOTIFY connectedChanged)
     Q_PROPERTY(bool    hasFix         READ hasFix         NOTIFY hasFixChanged)
     Q_PROPERTY(int     satellites     READ satellites     NOTIFY satellitesChanged)
@@ -22,9 +33,8 @@ class RaceBoxModel : public QObject {
     Q_PROPERTY(int     batteryPercent  READ batteryPercent  NOTIFY batteryPercentChanged)
     Q_PROPERTY(bool    batteryCharging READ batteryCharging NOTIFY batteryChargingChanged)
     Q_PROPERTY(bool    finishLineSet   READ finishLineSet   NOTIFY finishLineSetChanged)
-    Q_PROPERTY(bool    hasStartedTiming READ hasStartedTiming NOTIFY hasStartedTimingChanged)
+    Q_PROPERTY(LapTimerState lapTimerState READ lapTimerState NOTIFY lapTimerStateChanged)
 
-public:
     explicit RaceBoxModel(QObject *parent = nullptr);
 
     bool   connected()      const { return m_connected; }
@@ -40,13 +50,13 @@ public:
     int    batteryPercent()  const { return m_batteryPercent; }
     bool   batteryCharging() const { return m_batteryCharging; }
     bool   finishLineSet()   const { return m_finishLineSet; }
-    // True once the first lap of this app run (or since the finish line was
-    // last cleared) has started — stays true across a resetLapCounters() so
-    // UI prompts like "cross S/F line to start" don't reappear after a save.
-    bool   hasStartedTiming() const { return m_hasStartedTiming; }
+    // Single source of truth for the lap-timer lifecycle (see LapTimerState).
+    LapTimerState lapTimerState() const;
 
-    // Called from main.cpp to pass dashconfig finish line values at startup
-    void setFinishLine(double lat, double lon, double radiusM);
+    // Sets the start/finish line as a gate: a segment between two GPS points
+    // (A→B) spanning the track width. A lap is timed when the car's path crosses
+    // this segment. All-zero coordinates are treated as "unset" (no-op).
+    void setFinishLine(double latA, double lonA, double latB, double lonB);
 
     // Last known GPS fix — used by TrackModel's nearest-track auto-detect scan
     double lastLat() const { return m_lastLat; }
@@ -82,9 +92,10 @@ signals:
     void batteryPercentChanged();
     void batteryChargingChanged();
     void finishLineSetChanged();
-    void hasStartedTimingChanged();
-    // Emitted on each finish line tap so the caller can persist the coordinates
-    void finishLineLearned(double lat, double lon);
+    void lapTimerStateChanged();
+    // Emitted when the finish-line gate is learned (perpendicular to travel) or
+    // cleared (all zero), so the caller can persist the two endpoints.
+    void finishLineLearned(double latA, double lonA, double latB, double lonB);
     // Emitted to feed CanDataModel
     void speedKmhChanged(int kmh);
     // Emitted immediately when a lap completes — not throttled, safe for persistence.
@@ -95,7 +106,16 @@ private slots:
     void emitNotifications();
 
 private:
-    void updateLapTiming(double lat, double lon, double speedKmh);
+    // Tests whether the path segment (prev fix → current fix) crosses the
+    // finish-line gate; on a crossing it interpolates the exact crossing time
+    // between the two fixes and completes/starts a lap. prevMs/nowMs are the
+    // fix arrival times (from m_clock) used for that interpolation.
+    void updateLapTiming(double prevLat, double prevLon, double curLat, double curLon,
+                         double speedKmh, qint64 prevMs, qint64 nowMs);
+    // Builds a gate perpendicular to the recent direction of travel, centred on
+    // (lat, lon), and writes its two endpoints to the out-params.
+    void gateFromHeading(double lat, double lon,
+                         double &latA, double &lonA, double &latB, double &lonB) const;
     // Shared by clearFinishLine() and resetLapCounters() — resets lap number,
     // timer, and current-lap path. Does not touch m_hasStartedTiming or the
     // finish-line fields; callers handle those themselves.
@@ -106,12 +126,17 @@ private:
     bool   m_hasFix      = false;
     int    m_satellites  = 0;
 
-    // Lap timing
+    // Lap timing — a free-running monotonic clock (never restarted); lap
+    // boundaries are recorded as interpolated clock timestamps for sub-sample
+    // accuracy at 25 Hz.
     int           m_lapNumber   = 0;
     qint64        m_lastLapMs   = 0;
     qint64        m_bestLapMs   = 0;
-    QElapsedTimer m_lapTimer;
+    QElapsedTimer m_clock;              // started once in the constructor
+    qint64        m_lapStartMs  = 0;    // clock time of the current lap's start crossing
     bool          m_lapTimerRunning = false;
+    // Sticky: set on the first crossing of this run, stays true across a
+    // resetLapCounters() (session save). Distinguishes Armed from Standby.
     bool          m_hasStartedTiming = false;
 
     // Current lap GPS path — flat [lat, lon, lat, lon, …], distance-decimated
@@ -119,16 +144,22 @@ private:
     double          m_lastStoredLat = 0.0;
     double          m_lastStoredLon = 0.0;
 
-    // Finish line (virtual start/finish)
-    bool   m_finishLineSet  = false;
-    double m_finishLineLat  = 0.0;
-    double m_finishLineLon  = 0.0;
-    double m_finishRadiusM  = 20.0;
-    bool   m_inFinishZone   = false;
+    // Finish line as a gate: segment A→B spanning the track width. A lap is
+    // timed when the path (prev→cur fix) crosses this segment.
+    bool   m_finishLineSet = false;
+    double m_gateLatA = 0.0, m_gateLonA = 0.0;
+    double m_gateLatB = 0.0, m_gateLonB = 0.0;
 
-    // Last known position (for learnFinishLineHere)
-    double m_lastLat = 0.0;
+    // Previous fix — one endpoint of the crossing test segment.
+    double m_lastLat = 0.0;   // also the "last known position" for learn/scan
     double m_lastLon = 0.0;
+    qint64 m_prevFixMs   = 0; // arrival time of the previous fix
+    bool   m_havePrevFix = false;
+
+    // Recent direction of travel (radians, bearing) — used to orient a learned
+    // gate perpendicular to the track.
+    double m_headingRad  = 0.0;
+    bool   m_haveHeading = false;
 
     // Motion
     int    m_speedKmh       = 0;
@@ -150,8 +181,12 @@ private:
     static constexpr quint16 kDirtyBattery     = 0x100;
     static constexpr quint16 kDirtyFinishLine  = 0x200;
     static constexpr quint16 kDirtyCharging    = 0x400;
-    static constexpr quint16 kDirtyStartedTiming = 0x800;
     quint16 m_dirty = 0;
+
+    // Last lapTimerState() emitted — recomputed each notify tick; a transition
+    // fires lapTimerStateChanged(). Always coincides with some dirty bit, so the
+    // notify tick never early-returns through a real transition.
+    LapTimerState m_lastLapTimerState = Idle;
 
     QTimer m_notifyTimer;
 };

@@ -6,12 +6,15 @@ Item {
     // Flat [lat, lon, lat, lon, …] list for the lap being displayed
     property var path: []
 
-    // Exact coordinates set via the "Set Finish Line" button (dashConfig.finishLineLat/Lon)
-    property real finishLat: 0
-    property real finishLon: 0
+    // Finish-line gate endpoints A→B for the displayed lap (from TrackModel.finishLineFor)
+    property real finishLat1: 0
+    property real finishLon1: 0
+    property real finishLat2: 0
+    property real finishLon2: 0
 
     readonly property bool hasPath: path.length >= 4
-    readonly property bool hasFinish: finishLat !== 0 || finishLon !== 0
+    readonly property bool hasFinish: (finishLat1 !== 0 || finishLon1 !== 0)
+                                   && (finishLat2 !== 0 || finishLon2 !== 0)
 
     // Projects a lat/lon to canvas pixels. Declared once at the component
     // level (rather than inside onPaint) so repainting doesn't allocate a
@@ -45,12 +48,16 @@ Item {
                 if (lon < minLon) minLon = lon
                 if (lon > maxLon) maxLon = lon
             }
-            // Include the finish line so its marker is never clipped outside the map
+            // Include the finish gate so it's never clipped outside the map
             if (root.hasFinish) {
-                if (root.finishLat < minLat) minLat = root.finishLat
-                if (root.finishLat > maxLat) maxLat = root.finishLat
-                if (root.finishLon < minLon) minLon = root.finishLon
-                if (root.finishLon > maxLon) maxLon = root.finishLon
+                const glat = [root.finishLat1, root.finishLat2]
+                const glon = [root.finishLon1, root.finishLon2]
+                for (let k = 0; k < 2; k++) {
+                    if (glat[k] < minLat) minLat = glat[k]
+                    if (glat[k] > maxLat) maxLat = glat[k]
+                    if (glon[k] < minLon) minLon = glon[k]
+                    if (glon[k] > maxLon) maxLon = glon[k]
+                }
             }
 
             const midLat = (minLat + maxLat) / 2.0
@@ -85,38 +92,17 @@ Item {
             }
             ctx.stroke()
 
-            // Start/finish marker — a dash perpendicular to the direction of travel,
-            // drawn at the exact coordinates set via the "Set Finish Line" button.
-            // Orientation comes from the first two path samples (the local track
-            // tangent), independent of the marker's own position, so the dash is
-            // always a clean 90° cross regardless of how far the marker sits from
-            // the first captured GPS fix.
+            // Start/finish gate — draw the real A→B segment at its true position
+            // and orientation (the gate spans the track width by construction).
             if (root.hasFinish) {
-                const start   = root.toPoint(root.finishLat, root.finishLon, minLon, minLat, kx, scale, offX, offY, drawH)
-                const dirFrom = root.toPoint(path[0], path[1], minLon, minLat, kx, scale, offX, offY, drawH)
-                const dirTo   = root.toPoint(path[2], path[3], minLon, minLat, kx, scale, offX, offY, drawH)
-
-                let dx = dirTo[0] - dirFrom[0]
-                let dy = dirTo[1] - dirFrom[1]
-                const len = Math.hypot(dx, dy)
-                if (len > 1e-6) {
-                    dx /= len
-                    dy /= len
-                } else {
-                    dx = 1
-                    dy = 0
-                }
-                // Perpendicular to travel direction
-                const px = -dy
-                const py = dx
-
-                const halfLen = 10
+                const a = root.toPoint(root.finishLat1, root.finishLon1, minLon, minLat, kx, scale, offX, offY, drawH)
+                const b = root.toPoint(root.finishLat2, root.finishLon2, minLon, minLat, kx, scale, offX, offY, drawH)
                 ctx.strokeStyle = "#FFFFFF"
                 ctx.lineWidth = 3
                 ctx.lineCap = "butt"
                 ctx.beginPath()
-                ctx.moveTo(start[0] - px * halfLen, start[1] - py * halfLen)
-                ctx.lineTo(start[0] + px * halfLen, start[1] + py * halfLen)
+                ctx.moveTo(a[0], a[1])
+                ctx.lineTo(b[0], b[1])
                 ctx.stroke()
             }
         }
