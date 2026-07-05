@@ -31,15 +31,9 @@ class DashConfig : public QObject {
 
     // --- RaceBox BLE ---------------------------------------------------------
     Q_PROPERTY(QString raceBoxDeviceName  READ raceBoxDeviceName  CONSTANT)
-    Q_PROPERTY(double  finishLineLat      READ finishLineLat      CONSTANT)
-    Q_PROPERTY(double  finishLineLon      READ finishLineLon      CONSTANT)
-    Q_PROPERTY(double  finishLineRadiusM  READ finishLineRadiusM  CONSTANT)
 
 public:
     explicit DashConfig(QObject *parent = nullptr);
-
-public slots:
-    void saveFinishLine(double lat, double lon);
 
     int     ledCount()        const { return m_ledCount; }
     int     flashIntervalMs() const { return m_flashIntervalMs; }
@@ -62,9 +56,6 @@ public slots:
     QString oilTempPosition()    const { return m_oilTempPosition; }
     bool    lapTimerVisible()    const { return m_lapTimerVisible; }
     QString raceBoxDeviceName()  const { return m_raceBoxDeviceName; }
-    double  finishLineLat()      const { return m_finishLineLat; }
-    double  finishLineLon()      const { return m_finishLineLon; }
-    double  finishLineRadiusM()  const { return m_finishLineRadiusM; }
 
 private:
     int     m_ledCount        = 10;
@@ -89,7 +80,4 @@ private:
     bool    m_lapTimerVisible   = true;
 
     QString m_raceBoxDeviceName = "RaceBox Mini";
-    double  m_finishLineLat     = 0.0;
-    double  m_finishLineLon     = 0.0;
-    double  m_finishLineRadiusM = 20.0;
 };

@@ -86,6 +86,46 @@ Rectangle {
         // Spacer
         Item { Layout.fillWidth: true }
 
+        // Save Session button — visible only when stationary and laps have been recorded
+        Rectangle {
+            id: saveSessionBtn
+            visible: sessionModel.canSave
+            height: 20
+            width: saveSessionLabel.width + 16
+            color: saveSessionArea.pressed ? "#111122" : "transparent"
+            border.color: "#2a2a4a"
+            border.width: 1
+            radius: 2
+            Layout.alignment: Qt.AlignVCenter
+            onVisibleChanged: if (!visible) saveFlashTimer.stop()
+
+            Text {
+                id: saveSessionLabel
+                anchors.centerIn: parent
+                text: "SAVE SESSION"
+                color: "#4488cc"
+                font.pixelSize: 10
+                font.letterSpacing: 1
+                font.family: "monospace"
+            }
+
+            MouseArea {
+                id: saveSessionArea
+                anchors.fill: parent
+                onClicked: {
+                    sessionModel.saveCurrentSession()
+                    saveSessionLabel.text = "✓ SESSION SAVED"
+                    saveFlashTimer.restart()
+                }
+            }
+
+            Timer {
+                id: saveFlashTimer
+                interval: 1500
+                onTriggered: saveSessionLabel.text = "SAVE SESSION"
+            }
+        }
+
         // Finish line button — enabled only when GPS fix is active
         Rectangle {
             height: 20
@@ -96,7 +136,7 @@ Rectangle {
                         :                              "#222222"
             border.width: 1
             radius: 2
-            anchors.verticalCenter: parent.verticalCenter
+            Layout.alignment: Qt.AlignVCenter
 
             Text {
                 id: finishLineLabel

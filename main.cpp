@@ -1,6 +1,7 @@
 #include <QGuiApplication>
 #include <QQmlApplicationEngine>
 #include <QQmlContext>
+#include <QQmlEngine>
 #include <QMetaType>
 #include <QCommandLineParser>
 #include <QCursor>
@@ -11,6 +12,8 @@
 #include "src/dashconfig.h"
 #include "src/raceboxmodel.h"
 #include "src/mockraceboxprovider.h"
+#include "src/sessionmodel.h"
+#include "src/trackmodel.h"
 #include "src/logging.h"
 
 #ifdef HAVE_BLUETOOTH
@@ -22,6 +25,11 @@ int main(int argc, char *argv[])
     QGuiApplication app(argc, argv);
     qRegisterMetaType<QCanBusFrame>("QCanBusFrame");
     qRegisterMetaType<RaceBoxData>("RaceBoxData");
+
+    // Expose RaceBoxModel's enums (e.g. LapTimerState) to QML as `RaceBox.Armed`
+    // etc. Uncreatable: QML references the enum values, not instances.
+    qmlRegisterUncreatableMetaObject(RaceBoxModel::staticMetaObject, "RaceDash", 1, 0,
+                                     "RaceBox", "Enum access only");
 
     QCommandLineParser parser;
     parser.addOption({"mock",  "Use mock providers (no hardware required)"});
@@ -40,21 +48,20 @@ int main(int argc, char *argv[])
     DashConfig    dashConfig;
     CanDataModel  dataModel;
     RaceBoxModel  raceBoxModel;
+    TrackModel    trackModel(&raceBoxModel, useMock);
+    SessionModel  sessionModel(&dataModel, &raceBoxModel, &trackModel);
 
-    if (useMock) {
-        double flLat, flLon, flRadius;
-        MockRaceBoxProvider::defaultFinishLine(flLat, flLon, flRadius);
-        raceBoxModel.setFinishLine(flLat, flLon, flRadius);
-        qCInfo(lcApp) << "Mock finish line loaded";
-    } else {
-        raceBoxModel.setFinishLine(dashConfig.finishLineLat(),
-                                   dashConfig.finishLineLon(),
-                                   dashConfig.finishLineRadiusM());
-        if (dashConfig.finishLineLat() != 0.0 || dashConfig.finishLineLon() != 0.0)
-            qCInfo(lcApp) << "Finish line loaded from config:"
-                          << dashConfig.finishLineLat() << dashConfig.finishLineLon();
-        else
-            qCInfo(lcApp) << "No finish line in config — tap SET FINISH LINE on track";
+    // Finish lines are owned by TrackModel and applied below via
+    // applyStartupFinishLine(). Mock mode seeds a synthetic line (once — skipped
+    // if one is already stored for whichever slot this would write to) through
+    // the same onFinishLineLearned() path a real learn uses, so it lands in
+    // TrackModel (keyed by whatever track is active, or the global "" slot if
+    // none is) and shows up on the session map, not just in RaceBoxModel.
+    if (useMock && trackModel.finishLineFor(trackModel.activeTrackId()).isEmpty()) {
+        double latA, lonA, latB, lonB;
+        MockRaceBoxProvider::defaultFinishLine(latA, lonA, latB, lonB);
+        trackModel.onFinishLineLearned(latA, lonA, latB, lonB);
+        qCInfo(lcApp) << "Mock finish-line gate seeded";
     }
 
     // CAN provider
@@ -85,13 +92,26 @@ int main(int argc, char *argv[])
                      Qt::QueuedConnection);
     QObject::connect(&raceBoxModel, &RaceBoxModel::speedKmhChanged,
                      &dataModel, &CanDataModel::setSpeed);
+    QObject::connect(&sessionModel, &SessionModel::sessionSaved,
+                     &raceBoxModel, &RaceBoxModel::resetLapCounters);
+
+    // TrackModel is the single owner of finish lines: it stores one per track id
+    // plus a global (no-track) line, persists them to tracks-user.json, and
+    // applies the right one to RaceBoxModel on selection / startup.
     QObject::connect(&raceBoxModel, &RaceBoxModel::finishLineLearned,
-                     &dashConfig, &DashConfig::saveFinishLine);
+                     &trackModel, &TrackModel::onFinishLineLearned);
+    QObject::connect(&trackModel, &TrackModel::applyFinishLine,
+                     &raceBoxModel, &RaceBoxModel::setFinishLine);
+    QObject::connect(&trackModel, &TrackModel::clearFinishLineRequested,
+                     &raceBoxModel, &RaceBoxModel::clearFinishLine);
+    trackModel.applyStartupFinishLine();
 
     QQmlApplicationEngine engine;
-    engine.rootContext()->setContextProperty("dashConfig",   &dashConfig);
+    engine.rootContext()->setContextProperty("dashConfig",    &dashConfig);
     engine.rootContext()->setContextProperty("dataModel",    &dataModel);
     engine.rootContext()->setContextProperty("raceBoxModel", &raceBoxModel);
+    engine.rootContext()->setContextProperty("sessionModel", &sessionModel);
+    engine.rootContext()->setContextProperty("trackModel",   &trackModel);
     engine.rootContext()->setContextProperty("kioskMode",    kioskMode);
     engine.load(QUrl(QStringLiteral("qrc:/qml/main.qml")));
 

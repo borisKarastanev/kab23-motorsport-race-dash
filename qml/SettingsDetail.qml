@@ -7,26 +7,31 @@ Item {
 
     property string settingKey: ""
     property string title: ""
+    property var    payload:    ({})
 
     // Inline component declarations — one per settings section.
     // Each future per-item plan replaces the placeholder here and adds
     // its real QML file; no navigation code changes needed.
-    Component { id: compUi;           PlaceholderSetting { title: "CONFIGURE UI" } }
-    Component { id: compNetwork;      PlaceholderSetting { title: "NETWORK CONNECTION" } }
-    Component { id: compIntegrations; PlaceholderSetting { title: "INTEGRATIONS" } }
-    Component { id: compSessions;     PlaceholderSetting { title: "SESSIONS" } }
-    Component { id: compTracks;       PlaceholderSetting { title: "TRACKS" } }
-    Component { id: compDevice;       PlaceholderSetting { title: "DEVICE INFO" } }
+    Component { id: compUi;             PlaceholderSetting { title: "CONFIGURE UI" } }
+    Component { id: compNetwork;        PlaceholderSetting { title: "NETWORK CONNECTION" } }
+    Component { id: compIntegrations;   PlaceholderSetting { title: "INTEGRATIONS" } }
+    Component { id: compSessions;         SessionGroupsList {} }
+    Component { id: compSessionTrackList; SessionsList {} }
+    Component { id: compSessionSummary;   SessionSummary {} }
+    Component { id: compTracks;         TracksBrowser {} }
+    Component { id: compDevice;         PlaceholderSetting { title: "DEVICE INFO" } }
 
     function registryFor(key) {
         switch (key) {
-            case "ui":           return compUi
-            case "network":      return compNetwork
-            case "integrations": return compIntegrations
-            case "sessions":     return compSessions
-            case "tracks":       return compTracks
-            case "device":       return compDevice
-            default:             return compUi
+            case "ui":              return compUi
+            case "network":         return compNetwork
+            case "integrations":    return compIntegrations
+            case "sessions":           return compSessions
+            case "session-track-list": return compSessionTrackList
+            case "session-summary":    return compSessionSummary
+            case "tracks":          return compTracks
+            case "device":          return compDevice
+            default:                return compUi
         }
     }
 
@@ -85,10 +90,15 @@ Item {
 
     // ── content area ─────────────────────────────────────────
     Loader {
+        id: contentLoader
         anchors.top: header.bottom
         anchors.left: parent.left
         anchors.right: parent.right
         anchors.bottom: parent.bottom
         sourceComponent: registryFor(settingKey)
+        onLoaded: {
+            if ("payload"   in item) item.payload   = detailRoot.payload
+            if ("stackView" in item) item.stackView = detailRoot.StackView.view
+        }
     }
 }

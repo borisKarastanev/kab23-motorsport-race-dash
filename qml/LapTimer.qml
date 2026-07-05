@@ -1,5 +1,7 @@
 import QtQuick 2.15
 import QtQuick.Layouts 1.15
+import RaceDash 1.0
+import "TimeFormat.js" as Fmt
 
 Rectangle {
     color: "#111111"
@@ -11,13 +13,6 @@ Rectangle {
         const s = Math.floor(totalMs / 1000)
         const t = totalMs % 1000
         return s + "." + String(t).padStart(3, "0")
-    }
-
-    function formatMs(ms) {
-        if (ms <= 0) return "--:--.---"
-        const m = Math.floor(ms / 60000)
-        return m + ":" + String(Math.floor((ms % 60000) / 1000)).padStart(2, "0")
-               + "." + String(ms % 1000).padStart(3, "0")
     }
 
     function formatDelta(ms) {
@@ -62,7 +57,7 @@ Rectangle {
                 font.letterSpacing: 2
             }
             Text {
-                text: formatMs(raceBoxModel.currentLapMs)
+                text: Fmt.formatMs(raceBoxModel.currentLapMs)
                 color: "#ffffff"
                 font.pixelSize: 22
                 font.bold: true
@@ -91,7 +86,7 @@ Rectangle {
                 font.letterSpacing: 2
             }
             Text {
-                text: formatMs(raceBoxModel.lastLapMs)
+                text: Fmt.formatMs(raceBoxModel.lastLapMs)
                 color: {
                     if (raceBoxModel.lastLapMs <= 0) return "#555555"
                     if (raceBoxModel.bestLapMs > 0 && raceBoxModel.lastLapMs === raceBoxModel.bestLapMs)
@@ -115,7 +110,7 @@ Rectangle {
                 font.letterSpacing: 2
             }
             Text {
-                text: formatMs(raceBoxModel.bestLapMs)
+                text: Fmt.formatMs(raceBoxModel.bestLapMs)
                 color: raceBoxModel.bestLapMs > 0 ? "#00cc44" : "#555555"
                 font.pixelSize: 18
                 font.bold: true
@@ -124,9 +119,11 @@ Rectangle {
         }
     }
 
-    // Waiting overlay — pulsing prompt shown when finish line is set but not yet crossed
+    // Waiting overlay — pulsing prompt shown only while the timer is Armed (first
+    // crossing of this run). After a Save Session reset the state is Standby, so
+    // the prompt stays hidden and the panel shows plain "--:--" instead.
     Rectangle {
-        visible: raceBoxModel.finishLineSet && raceBoxModel.lapNumber === 0 && raceBoxModel.hasFix
+        visible: raceBoxModel.lapTimerState === RaceBox.Armed
         anchors.fill: parent
         color: parent.color
         radius: parent.radius
