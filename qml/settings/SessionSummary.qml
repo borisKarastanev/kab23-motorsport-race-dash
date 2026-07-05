@@ -145,6 +145,10 @@ Item {
                 model: [
                     { label: "TRACK",        value: payload.trackName || "—" },
                     { label: "TOP SPEED",    value: (payload.topSpeedKmh || 0) + " km/h" },
+                    { label: "MAX LATERAL/MAX LONGITUDINAL",
+                      value: (payload.maxLatG !== undefined && payload.maxLonG !== undefined)
+                             ? payload.maxLatG.toFixed(2) + "/" + payload.maxLonG.toFixed(2) + " g"
+                             : "—" },
                     { label: "MAX OIL TEMP", value: (payload.maxOilC     || 0).toFixed(1) + " °C" },
                     { label: "MAX COOLANT",  value: (payload.maxCoolantC || 0).toFixed(1) + " °C" }
                 ]

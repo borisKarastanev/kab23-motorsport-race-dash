@@ -65,6 +65,18 @@ public:
     // Shared distance helper — also used by TrackModel for nearest-track scans
     static double haversineM(double lat1, double lon1, double lat2, double lon2);
 
+    // Peak absolute g-force over the current session, read by SessionModel at
+    // save time. Accumulated from every sample in onData(), not the throttled
+    // gForceX/Y properties, so brief peaks between notify ticks aren't missed.
+    double maxLatG() const { return m_maxLatG; }
+    double maxLonG() const { return m_maxLonG; }
+
+    // Zeroes the session g-force peaks. Called directly by SessionModel at save
+    // time alongside its own accumulator resets, so every session-peak stat is
+    // reset by the same mechanism (rather than piggybacking on the lap-state
+    // reset in resetLapCounters()).
+    void resetSessionStats();
+
 public slots:
     void onData(const RaceBoxData &data);
     void onConnectionStateChanged(bool connected);
@@ -172,6 +184,9 @@ private:
     double m_gForceX        = 0.0;
     double m_gForceY        = 0.0;
     double m_gForceZ        = 0.0;
+    // Session peak absolute g-force, zeroed by resetSessionStats() at save time.
+    double m_maxLatG        = 0.0;
+    double m_maxLonG        = 0.0;
     int    m_batteryPercent  = 0;
     bool   m_batteryCharging = false;
 

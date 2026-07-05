@@ -113,6 +113,8 @@ void SessionModel::saveCurrentSession()
     record["topSpeedKmh"]  = m_topSpeedKmh;
     record["maxOilC"]      = m_maxOilC;
     record["maxCoolantC"]  = m_maxCoolantC;
+    record["maxLatG"]      = m_raceBoxModel->maxLatG();
+    record["maxLonG"]      = m_raceBoxModel->maxLonG();
     record["trackId"]      = m_trackModel->activeTrackId();
     record["trackName"]    = m_trackModel->activeTrackName();
 
@@ -122,12 +124,16 @@ void SessionModel::saveCurrentSession()
     persist();
     emit sessionsChanged();
 
-    // Reset accumulators so a fresh session can be recorded without rebooting
+    // Reset accumulators so a fresh session can be recorded without rebooting.
+    // The g-force peaks live in RaceBoxModel (it sees raw un-throttled samples)
+    // but are reset here, alongside our own accumulators, so every session-peak
+    // stat clears at the same point in the save.
     m_currentLapTimes.clear();
     m_currentLapPaths.clear();
     m_topSpeedKmh = 0;
     m_maxOilC     = 0.0;
     m_maxCoolantC = 0.0;
+    m_raceBoxModel->resetSessionStats();
     emit hasLapsChanged();
     updateCanSave();
 
@@ -219,7 +225,12 @@ void SessionModel::load()
             path.reserve(pointArr.size());
             for (const QJsonValue &coord : pointArr)
                 path.append(coord.toDouble());
-            lapPaths.append(path);
+            // QVariantList::append() is ambiguous when the argument is itself a
+            // QVariantList (QList<QVariant>): overload resolution prefers the exact
+            // QList<QVariant> match — which concatenates all of path's elements —
+            // over the QVariant conversion that would nest path as one element.
+            // Wrap explicitly so each lap's path is nested, not flattened.
+            lapPaths.append(QVariant(path));
         }
         map["lapPaths"] = lapPaths;
 

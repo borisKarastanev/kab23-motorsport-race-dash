@@ -134,6 +134,8 @@ void RaceBoxModel::onData(const RaceBoxData &d)
         m_gForceX = gx; m_gForceY = gy; m_gForceZ = gz;
         m_dirty |= kDirtyGForce;
     }
+    m_maxLatG = std::max(m_maxLatG, std::fabs(gx));
+    m_maxLonG = std::max(m_maxLonG, std::fabs(gy));
 
     const int  batt     = d.batteryRaw & 0x7F;
     const bool charging = (d.batteryRaw & 0x80) != 0;
@@ -287,6 +289,12 @@ void RaceBoxModel::clearFinishLine()
     m_dirty |= kDirtyFinishLine;
     emit finishLineLearned(0.0, 0.0, 0.0, 0.0);
     qCInfo(lcRaceBox) << "Finish line cleared";
+}
+
+void RaceBoxModel::resetSessionStats()
+{
+    m_maxLatG = 0.0;
+    m_maxLonG = 0.0;
 }
 
 void RaceBoxModel::resetLapCounters()
