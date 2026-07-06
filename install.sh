@@ -22,6 +22,11 @@ sudo apt install -y \
 echo "=== Building application ==="
 mkdir -p "$REPO_DIR/build"
 chown -R "$DASHBOARD_USER:$DASHBOARD_USER" "$REPO_DIR/build"
+# Unlink the previous binary before relinking — if this script is run as an
+# in-app update while the dashboard is still running, ld writing the output
+# in place would hit ETXTBSY. Unlinking is safe: the running process keeps
+# its inode open until it exits.
+rm -f "$REPO_DIR/build/bmw-e46-dash"
 # Run cmake and make as the repo owner — Qt cmake macros write into the source
 # tree via configure_file, which fails when running as root.
 sudo -u "$DASHBOARD_USER" bash -c "cd '$REPO_DIR/build' && cmake .. -DCMAKE_BUILD_TYPE=Release && make -j\$(nproc)"

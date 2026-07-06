@@ -13,6 +13,14 @@
         <file>qml/settings/SessionSummary.qml</file>
         <file>qml/settings/TrackMap.qml</file>
         <file>qml/settings/TracksBrowser.qml</file>
+        <file>qml/settings/DeviceInfoMenu.qml</file>
+        <file>qml/settings/AppVersionDetail.qml</file>
+        <file>qml/settings/DeviceStats.qml</file>
+        <file>qml/settings/DeviceLog.qml</file>
+        <file>qml/settings/PasswordModal.qml</file>
+        <file>qml/settings/OnScreenKeyboard.qml</file>
+        <file>qml/settings/TextButton.qml</file>
+        <file>qml/settings/StatRow.qml</file>
         <file>qml/Gauge.qml</file>
         <file>qml/GearIndicator.qml</file>
         <file>qml/LedStrip.qml</file>
