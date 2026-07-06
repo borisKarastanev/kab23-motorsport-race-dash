@@ -1,15 +1,17 @@
 import QtQuick 2.15
 
+// Wi-Fi / Wired list under Settings > Device Settings > Network Connection.
 Item {
     id: root
     property var stackView: null
 
+    Component.onCompleted: networkModel.acquire()
+    Component.onDestruction: networkModel.release()
+
     ListModel {
         id: menuModel
-        ListElement { itemTitle: "APP VERSION";  itemKey: "device-version" }
-        ListElement { itemTitle: "DEVICE STATS";  itemKey: "device-stats" }
-        ListElement { itemTitle: "DEVICE LOG";    itemKey: "device-log" }
-        ListElement { itemTitle: "NETWORK CONNECTION"; itemKey: "network" }
+        ListElement { itemTitle: "WI-FI";  itemKey: "network-wifi";  connKind: "wifi" }
+        ListElement { itemTitle: "WIRED";  itemKey: "network-wired"; connKind: "wired" }
     }
 
     ListView {
@@ -36,6 +38,18 @@ Item {
                 }
 
                 Text {
+                    anchors.right: chevron.left
+                    anchors.rightMargin: 8
+                    anchors.verticalCenter: parent.verticalCenter
+                    text: "✓"
+                    color: "#00cc44"
+                    font.pixelSize: 14
+                    font.bold: true
+                    visible: connKind === "wifi" ? networkModel.wifiConnected : networkModel.wiredConnected
+                }
+
+                Text {
+                    id: chevron
                     anchors.right: parent.right
                     anchors.rightMargin: 20
                     anchors.verticalCenter: parent.verticalCenter

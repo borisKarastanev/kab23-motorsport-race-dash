@@ -18,6 +18,7 @@
 #include "src/logbuffermodel.h"
 #include "src/devicestatsmodel.h"
 #include "src/updatemodel.h"
+#include "src/networkmodel.h"
 
 #ifdef HAVE_BLUETOOTH
 #include "src/raceboxprovider.h"
@@ -39,6 +40,8 @@ int main(int argc, char *argv[])
                                      "RaceBox", "Enum access only");
     qmlRegisterUncreatableMetaObject(UpdateModel::staticMetaObject, "RaceDash", 1, 0,
                                      "Updates", "Enum access only");
+    qmlRegisterUncreatableMetaObject(NetworkModel::staticMetaObject, "RaceDash", 1, 0,
+                                     "Net", "Enum access only");
 
     QCommandLineParser parser;
     parser.addOption({"mock",  "Use mock providers (no hardware required)"});
@@ -61,6 +64,7 @@ int main(int argc, char *argv[])
     SessionModel     sessionModel(&dataModel, &raceBoxModel, &trackModel);
     UpdateModel      updateModel(useMock);
     DeviceStatsModel deviceStatsModel;
+    NetworkModel     networkModel(useMock);
 
     // Finish lines are owned by TrackModel and applied below via
     // applyStartupFinishLine(). Mock mode seeds a synthetic line (once — skipped
@@ -125,6 +129,7 @@ int main(int argc, char *argv[])
     engine.rootContext()->setContextProperty("trackModel",      &trackModel);
     engine.rootContext()->setContextProperty("updateModel",     &updateModel);
     engine.rootContext()->setContextProperty("deviceStatsModel", &deviceStatsModel);
+    engine.rootContext()->setContextProperty("networkModel",    &networkModel);
     engine.rootContext()->setContextProperty("logBuffer",       &logBuffer);
     engine.rootContext()->setContextProperty("kioskMode",       kioskMode);
     engine.load(QUrl(QStringLiteral("qrc:/qml/main.qml")));

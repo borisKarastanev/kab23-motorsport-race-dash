@@ -30,6 +30,7 @@ add_executable(bmw-e46-dash
     src/logbuffermodel.cpp
     src/devicestatsmodel.cpp
     src/updatemodel.cpp
+    src/networkmodel.cpp
     ${RESOURCES}
 )
 

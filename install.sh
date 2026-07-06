@@ -31,6 +31,24 @@ rm -f "$REPO_DIR/build/bmw-e46-dash"
 # tree via configure_file, which fails when running as root.
 sudo -u "$DASHBOARD_USER" bash -c "cd '$REPO_DIR/build' && cmake .. -DCMAKE_BUILD_TYPE=Release && make -j\$(nproc)"
 
+echo "=== Enabling NetworkManager control for the dashboard user ==="
+# Network Connection settings shell out to nmcli as the dashboard user (no
+# sudo). netdev group membership is what nmcli's polkit policy normally
+# checks, but the dashboard runs as a systemd service with no active logind
+# session, so the stock "active session" polkit rule doesn't apply here —
+# without this explicit rule, nmcli calls are silently denied under the
+# service even though they work fine when tested from an interactive shell.
+sudo usermod -aG netdev "$DASHBOARD_USER"
+sudo mkdir -p /etc/polkit-1/rules.d
+sudo tee /etc/polkit-1/rules.d/50-race-dash-nm.rules > /dev/null << 'RULES'
+polkit.addRule(function(action, subject) {
+    if (action.id.indexOf("org.freedesktop.NetworkManager.") === 0 &&
+        subject.isInGroup("netdev")) {
+        return polkit.Result.YES;
+    }
+});
+RULES
+
 echo "=== Enabling Bluetooth adapter ==="
 rfkill unblock bluetooth || true
 # Drop-in for bluetooth.service: unblock rfkill just before bluetoothd starts.
