@@ -8,7 +8,6 @@ Item {
     ListModel {
         id: menuModel
         ListElement { itemTitle: "CONFIGURE UI";       itemKey: "ui" }
-        ListElement { itemTitle: "NETWORK CONNECTION"; itemKey: "network" }
         ListElement { itemTitle: "INTEGRATIONS";       itemKey: "integrations" }
         ListElement { itemTitle: "SESSIONS";           itemKey: "sessions" }
         ListElement { itemTitle: "TRACKS";             itemKey: "tracks" }

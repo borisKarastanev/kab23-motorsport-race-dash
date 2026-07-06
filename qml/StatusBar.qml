@@ -1,5 +1,6 @@
 import QtQuick 2.15
 import QtQuick.Layouts 1.15
+import "settings"
 
 Rectangle {
     color: "#0d0d0d"
@@ -81,6 +82,14 @@ Rectangle {
                 font.family: "monospace"
                 anchors.verticalCenter: parent.verticalCenter
             }
+        }
+
+        // Wi-Fi connected indicator — icon only, no label
+        WifiIcon {
+            visible: networkModel.wifiConnected
+            size: 12
+            color: "#448844"
+            Layout.alignment: Qt.AlignVCenter
         }
 
         // Spacer

@@ -17,6 +17,12 @@
         <file>qml/settings/AppVersionDetail.qml</file>
         <file>qml/settings/DeviceStats.qml</file>
         <file>qml/settings/DeviceLog.qml</file>
+        <file>qml/settings/NetworkMenu.qml</file>
+        <file>qml/settings/WifiIcon.qml</file>
+        <file>qml/settings/WifiDetail.qml</file>
+        <file>qml/settings/WifiPasswordModal.qml</file>
+        <file>qml/settings/WiredDetail.qml</file>
+        <file>qml/settings/PasswordEntryModal.qml</file>
         <file>qml/settings/PasswordModal.qml</file>
         <file>qml/settings/OnScreenKeyboard.qml</file>
         <file>qml/settings/TextButton.qml</file>

@@ -13,7 +13,9 @@ Item {
     // Each future per-item plan replaces the placeholder here and adds
     // its real QML file; no navigation code changes needed.
     Component { id: compUi;             PlaceholderSetting { title: "CONFIGURE UI" } }
-    Component { id: compNetwork;        PlaceholderSetting { title: "NETWORK CONNECTION" } }
+    Component { id: compNetwork;        NetworkMenu {} }
+    Component { id: compNetworkWifi;    WifiDetail {} }
+    Component { id: compNetworkWired;   WiredDetail {} }
     Component { id: compIntegrations;   PlaceholderSetting { title: "INTEGRATIONS" } }
     Component { id: compSessions;         SessionGroupsList {} }
     Component { id: compSessionTrackList; SessionsList {} }
@@ -28,6 +30,8 @@ Item {
         switch (key) {
             case "ui":              return compUi
             case "network":         return compNetwork
+            case "network-wifi":    return compNetworkWifi
+            case "network-wired":   return compNetworkWired
             case "integrations":    return compIntegrations
             case "sessions":           return compSessions
             case "session-track-list": return compSessionTrackList
