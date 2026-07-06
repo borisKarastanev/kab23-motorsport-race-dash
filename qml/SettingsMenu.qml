@@ -12,7 +12,7 @@ Item {
         ListElement { itemTitle: "INTEGRATIONS";       itemKey: "integrations" }
         ListElement { itemTitle: "SESSIONS";           itemKey: "sessions" }
         ListElement { itemTitle: "TRACKS";             itemKey: "tracks" }
-        ListElement { itemTitle: "DEVICE INFO";        itemKey: "device" }
+        ListElement { itemTitle: "DEVICE SETTINGS";    itemKey: "device" }
     }
 
     // ── header ───────────────────────────────────────────────
