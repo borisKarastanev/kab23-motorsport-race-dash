@@ -49,10 +49,10 @@ Item {
         SettingsDetail {}
     }
 
-    // ── right-swipe → back to dashboard ──────────────────────
-    // Only active at depth 1 (menu); disabled inside a detail view.
+    // ── right-swipe → back ────────────────────────────────────
+    // Mirrors the "‹ BACK" button on every settings view: at depth 1 (menu)
+    // it returns to the dashboard, otherwise it pops one level off the stack.
     DragHandler {
-        enabled: stack.depth === 1
         target: null
         yAxis.enabled: false
 
@@ -62,8 +62,12 @@ Item {
             if (active) {
                 startX = centroid.position.x
             } else {
-                if (centroid.position.x - startX > settingsRoot.width * 0.25)
-                    settingsRoot.closeDashboardRequested()
+                if (centroid.position.x - startX > settingsRoot.width * 0.25) {
+                    if (stack.depth > 1)
+                        stack.pop()
+                    else
+                        settingsRoot.closeDashboardRequested()
+                }
             }
         }
     }
