@@ -15,6 +15,9 @@
 #include "src/sessionmodel.h"
 #include "src/trackmodel.h"
 #include "src/logging.h"
+#include "src/logbuffermodel.h"
+#include "src/devicestatsmodel.h"
+#include "src/updatemodel.h"
 
 #ifdef HAVE_BLUETOOTH
 #include "src/raceboxprovider.h"
@@ -26,10 +29,16 @@ int main(int argc, char *argv[])
     qRegisterMetaType<QCanBusFrame>("QCanBusFrame");
     qRegisterMetaType<RaceBoxData>("RaceBoxData");
 
+    // Installs the message handler before anything else logs, so startup
+    // messages are captured by the Device Log settings page.
+    LogBufferModel logBuffer;
+
     // Expose RaceBoxModel's enums (e.g. LapTimerState) to QML as `RaceBox.Armed`
     // etc. Uncreatable: QML references the enum values, not instances.
     qmlRegisterUncreatableMetaObject(RaceBoxModel::staticMetaObject, "RaceDash", 1, 0,
                                      "RaceBox", "Enum access only");
+    qmlRegisterUncreatableMetaObject(UpdateModel::staticMetaObject, "RaceDash", 1, 0,
+                                     "Updates", "Enum access only");
 
     QCommandLineParser parser;
     parser.addOption({"mock",  "Use mock providers (no hardware required)"});
@@ -45,11 +54,13 @@ int main(int argc, char *argv[])
     if (kioskMode)
         QGuiApplication::setOverrideCursor(QCursor(Qt::BlankCursor));
 
-    DashConfig    dashConfig;
-    CanDataModel  dataModel;
-    RaceBoxModel  raceBoxModel;
-    TrackModel    trackModel(&raceBoxModel, useMock);
-    SessionModel  sessionModel(&dataModel, &raceBoxModel, &trackModel);
+    DashConfig       dashConfig;
+    CanDataModel     dataModel;
+    RaceBoxModel     raceBoxModel;
+    TrackModel       trackModel(&raceBoxModel, useMock);
+    SessionModel     sessionModel(&dataModel, &raceBoxModel, &trackModel);
+    UpdateModel      updateModel(useMock);
+    DeviceStatsModel deviceStatsModel;
 
     // Finish lines are owned by TrackModel and applied below via
     // applyStartupFinishLine(). Mock mode seeds a synthetic line (once — skipped
@@ -107,12 +118,15 @@ int main(int argc, char *argv[])
     trackModel.applyStartupFinishLine();
 
     QQmlApplicationEngine engine;
-    engine.rootContext()->setContextProperty("dashConfig",    &dashConfig);
-    engine.rootContext()->setContextProperty("dataModel",    &dataModel);
-    engine.rootContext()->setContextProperty("raceBoxModel", &raceBoxModel);
-    engine.rootContext()->setContextProperty("sessionModel", &sessionModel);
-    engine.rootContext()->setContextProperty("trackModel",   &trackModel);
-    engine.rootContext()->setContextProperty("kioskMode",    kioskMode);
+    engine.rootContext()->setContextProperty("dashConfig",       &dashConfig);
+    engine.rootContext()->setContextProperty("dataModel",       &dataModel);
+    engine.rootContext()->setContextProperty("raceBoxModel",    &raceBoxModel);
+    engine.rootContext()->setContextProperty("sessionModel",    &sessionModel);
+    engine.rootContext()->setContextProperty("trackModel",      &trackModel);
+    engine.rootContext()->setContextProperty("updateModel",     &updateModel);
+    engine.rootContext()->setContextProperty("deviceStatsModel", &deviceStatsModel);
+    engine.rootContext()->setContextProperty("logBuffer",       &logBuffer);
+    engine.rootContext()->setContextProperty("kioskMode",       kioskMode);
     engine.load(QUrl(QStringLiteral("qrc:/qml/main.qml")));
 
     if (engine.rootObjects().isEmpty())

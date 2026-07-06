@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(bmw-e46-dash VERSION 1.0 LANGUAGES CXX)
+project(bmw-e46-dash VERSION 1.0.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -27,10 +27,15 @@ add_executable(bmw-e46-dash
     src/raceboxprovider.cpp
     src/sessionmodel.cpp
     src/trackmodel.cpp
+    src/logbuffermodel.cpp
+    src/devicestatsmodel.cpp
+    src/updatemodel.cpp
     ${RESOURCES}
 )
 
 target_include_directories(bmw-e46-dash PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+
+target_compile_definitions(bmw-e46-dash PRIVATE DASH_VERSION="${PROJECT_VERSION}")
 
 target_link_libraries(bmw-e46-dash
     Qt6::Core

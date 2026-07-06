@@ -19,7 +19,10 @@ Item {
     Component { id: compSessionTrackList; SessionsList {} }
     Component { id: compSessionSummary;   SessionSummary {} }
     Component { id: compTracks;         TracksBrowser {} }
-    Component { id: compDevice;         PlaceholderSetting { title: "DEVICE INFO" } }
+    Component { id: compDevice;         DeviceInfoMenu {} }
+    Component { id: compDeviceVersion;  AppVersionDetail {} }
+    Component { id: compDeviceStats;    DeviceStats {} }
+    Component { id: compDeviceLog;      DeviceLog {} }
 
     function registryFor(key) {
         switch (key) {
@@ -31,6 +34,9 @@ Item {
             case "session-summary":    return compSessionSummary
             case "tracks":          return compTracks
             case "device":          return compDevice
+            case "device-version":  return compDeviceVersion
+            case "device-stats":    return compDeviceStats
+            case "device-log":      return compDeviceLog
             default:                return compUi
         }
     }
