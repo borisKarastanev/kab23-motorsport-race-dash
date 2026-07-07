@@ -94,7 +94,65 @@ sed "s|@INSTALL_DIR@|$REPO_DIR|g; s|@DASHBOARD_USER@|$DASHBOARD_USER|g" \
 sudo systemctl daemon-reload
 sudo systemctl enable "$DASH_SERVICE"
 
+echo "=== Configuring clean console boot (kiosk display) ==="
+# The dashboard drives the DSI panel directly through Qt eglfs (bare KMS), so it
+# must be the sole DRM master. Two things otherwise fight it for the screen:
+#   1. The graphical desktop (labwc/Wayland). If the Pi boots to desktop, the
+#      compositor holds DRM master and every eglfs page flip is denied
+#      ("Could not queue DRM page flip ... Permission denied") — a frame-rate
+#      log flood that also leaves the dashboard invisible.
+#   2. The tty1 framebuffer console + login prompt, visible on the panel from
+#      power-on until the service draws its first frame — a raw Linux login
+#      prompt is not something dashboard users should ever see.
+# Force console boot and hide the console so the panel shows black -> dashboard.
+# Every step here is idempotent (this script also runs as the in-app updater).
+
+# Boot to console, never graphical.target.
+sudo systemctl set-default multi-user.target
+
+# Disable the tty1 autologin: it both shows a login prompt on the panel and, on
+# Pi OS, is what launches the labwc desktop session. Other VTs are left alone so
+# Ctrl+Alt+F2 remains an emergency console.
+sudo systemctl disable --now getty@tty1 2>/dev/null || true
+sudo rm -f /etc/systemd/system/getty@tty1.service.d/autologin.conf
+
+# Kernel cmdline + firmware splash. Bookworm moved these under /boot/firmware.
+BOOT_DIR=/boot/firmware
+[ -d "$BOOT_DIR" ] || BOOT_DIR=/boot
+CMDLINE="$BOOT_DIR/cmdline.txt"
+CONFIG="$BOOT_DIR/config.txt"
+
+if [ -f "$CMDLINE" ]; then
+    # Move the framebuffer console off the panel (tty1 -> tty3) and quiet the
+    # boot so no kernel text is drawn on screen.
+    sudo sed -i 's/\bconsole=tty1\b/console=tty3/g' "$CMDLINE"
+    for tok in quiet loglevel=3 logo.nologo vt.global_cursor_default=0; do
+        sudo grep -qw -- "$tok" "$CMDLINE" || sudo sed -i "1 s|\$| $tok|" "$CMDLINE"
+    done
+fi
+
+if [ -f "$CONFIG" ]; then
+    # Suppress the rainbow splash the GPU draws before the kernel starts.
+    # Managed as a marked block under [all] — an unconditional filter appended
+    # last, so it overrides any earlier board-specific ([pi4]/[cm4]/…) or
+    # pre-existing disable_splash setting regardless of where the file ends.
+    # Removed and re-appended each run, so repeated installs/updates stay
+    # idempotent instead of accumulating duplicate keys.
+    sudo sed -i '/^# --- race-dash boot (managed) ---$/,/^# --- end race-dash boot ---$/d' "$CONFIG"
+    sudo tee -a "$CONFIG" > /dev/null << 'BOOTCFG'
+# --- race-dash boot (managed) ---
+[all]
+disable_splash=1
+# --- end race-dash boot ---
+BOOTCFG
+fi
+
 echo "=== Installing XDG autostart (desktop/Wayland/X11 mode) ==="
+# NOTE: console boot is enforced above, so this desktop-session autostart is
+# inert on a normally-provisioned device. It only takes effect if someone later
+# re-enables the desktop (systemctl set-default graphical.target) — in which
+# case the eglfs system service MUST be disabled first, or the two will fight
+# for DRM master (see the console-boot section above).
 AUTOSTART_DIR="$USER_HOME/.config/autostart"
 mkdir -p "$AUTOSTART_DIR"
 cat > "$AUTOSTART_DIR/bmw-e46-dash.desktop" << EOF
@@ -110,9 +168,11 @@ echo ""
 echo "=== Done ==="
 echo "User: $DASHBOARD_USER  |  Install dir: $REPO_DIR"
 echo ""
-echo "On next boot the dashboard starts automatically."
-echo "Desktop session (Wayland/X11): XDG autostart launches the app."
-echo "Console/CLI mode:              systemd service uses eglfs."
+echo "Provisioned for console boot: the systemd service drives the panel via"
+echo "eglfs, and the desktop/console are suppressed so users see only the"
+echo "dashboard (black screen -> dashboard, no login prompt, no boot text)."
+echo ""
+echo "*** A REBOOT is required for the boot-display changes to take effect. ***"
 echo ""
 echo "To start manually now:"
 echo "  $REPO_DIR/build/bmw-e46-dash --kiosk"

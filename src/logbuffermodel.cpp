@@ -4,7 +4,6 @@
 #include <QDateTime>
 #include <QJsonDocument>
 #include <QJsonObject>
-#include <QMetaObject>
 #include <QMutexLocker>
 #include <QStringList>
 #include <QTextStream>
@@ -36,6 +35,14 @@ LogBufferModel::LogBufferModel(QObject *parent) : QObject(parent)
     m_logFile.setFileName(logPath());
     m_logFile.open(QIODevice::Append | QIODevice::Text);
     m_logBytes = m_logFile.size();
+
+    // Coalesce entriesChanged() to ≤10 Hz on the main thread. The message
+    // handler runs on arbitrary threads and only sets a dirty flag; this timer
+    // (owned by / ticking on the main thread) is the sole emitter, so a log
+    // flood can't post an unbounded stream of queued signals.
+    m_notifyTimer.setInterval(100);
+    connect(&m_notifyTimer, &QTimer::timeout, this, &LogBufferModel::flushNotifications);
+    m_notifyTimer.start();
 
     s_previousHandler = qInstallMessageHandler(&LogBufferModel::messageHandler);
 }
@@ -102,16 +109,16 @@ void LogBufferModel::handleMessage(QtMsgType type, const QMessageLogContext &con
 
     const QString category = context.category ? QString::fromUtf8(context.category) : QStringLiteral("default");
 
-    const bool visible = appendEntry(level, category, msg, false);
+    // appendEntry marks a pending notify when the entry lands in the bucket
+    // currently on screen (an "error" line shouldn't invalidate the list while
+    // "info" is selected). The notify timer drains that flag at ≤10 Hz — see
+    // flushNotifications — so a high-rate source can't drive per-message QML
+    // rebuilds. persistEntry still writes every line so nothing is lost.
+    appendEntry(level, category, msg, false);
     persistEntry(level, category, msg);
-
-    // Only refresh QML when the entry lands in the bucket currently on screen —
-    // an "error" line shouldn't invalidate the list while "info" is selected.
-    if (visible)
-        QMetaObject::invokeMethod(this, &LogBufferModel::entriesChanged, Qt::QueuedConnection);
 }
 
-bool LogBufferModel::appendEntry(const QString &level, const QString &category, const QString &message, bool prev)
+void LogBufferModel::appendEntry(const QString &level, const QString &category, const QString &message, bool prev)
 {
     QMutexLocker locker(&m_mutex);
 
@@ -122,7 +129,23 @@ bool LogBufferModel::appendEntry(const QString &level, const QString &category, 
     e.prev     = prev;
 
     pushCapped(bucketFor(level), e);
-    return level == m_filterLevel;
+
+    // Mark a refresh pending only when this lands in the on-screen bucket; the
+    // notify timer coalesces these into ≤10 Hz emits (see flushNotifications).
+    if (level == m_filterLevel)
+        m_pendingNotify = true;
+}
+
+void LogBufferModel::flushNotifications()
+{
+    bool notify;
+    {
+        QMutexLocker locker(&m_mutex);
+        notify = m_pendingNotify;
+        m_pendingNotify = false;
+    }
+    if (notify)
+        emit entriesChanged();
 }
 
 void LogBufferModel::persistEntry(const QString &level, const QString &category, const QString &message)

@@ -6,6 +6,7 @@
 #include <QString>
 #include <QMutex>
 #include <QFile>
+#include <QTimer>
 #include <deque>
 
 // Installs a Qt message handler and buffers the last 20 messages per level
@@ -41,9 +42,15 @@ private:
 
     static void messageHandler(QtMsgType type, const QMessageLogContext &context, const QString &msg);
     void handleMessage(QtMsgType type, const QMessageLogContext &context, const QString &msg);
-    // Appends under the mutex; returns true if the entry lands in the currently
-    // selected filter bucket (so the caller knows whether QML needs refreshing).
-    bool appendEntry(const QString &level, const QString &category, const QString &message, bool prev);
+    // Appends under the mutex; if the entry lands in the currently selected
+    // filter bucket, marks m_pendingNotify so the next notify tick refreshes QML.
+    void appendEntry(const QString &level, const QString &category, const QString &message, bool prev);
+    // Main-thread timer tick: emits entriesChanged() once if any visible-bucket
+    // message arrived since the last tick. Coalesces bursts so a high-rate log
+    // source (e.g. a frame-rate Qt render warning) can't drive per-message QML
+    // rebuilds and livelock the UI — the Device Log page binds directly to
+    // filteredEntries, so the refresh rate must stay bounded (≤10 Hz).
+    void flushNotifications();
     void loadPersisted();
     void persistEntry(const QString &level, const QString &category, const QString &message);
     void rotateIfNeeded();
@@ -59,6 +66,11 @@ private:
     QString m_filterLevel = "info";
     QFile m_logFile;
     qint64 m_logBytes = 0;
+    // Set (under m_mutex) whenever a message lands in the visible bucket; the
+    // notify timer consumes it. Coalesces per-message signals into ≤10 Hz.
+    bool m_pendingNotify = false;
+    // Free-running 10 Hz tick on the main thread that drains m_pendingNotify.
+    QTimer m_notifyTimer;
 
     static LogBufferModel *s_instance;
     static QtMessageHandler s_previousHandler;
