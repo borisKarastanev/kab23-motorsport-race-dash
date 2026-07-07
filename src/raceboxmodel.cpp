@@ -1,6 +1,8 @@
 #include "raceboxmodel.h"
 #include "logging.h"
+#include <algorithm>
 #include <cmath>
+#include <utility>
 
 static constexpr double kEarthRadiusM   = 6371000.0;
 static constexpr double kMetersPerDegLat = 111132.0;
@@ -47,6 +49,31 @@ qint64 RaceBoxModel::currentLapMs() const
 {
     if (!m_lapTimerRunning) return 0;
     return m_clock.elapsed() - m_lapStartMs;
+}
+
+qint64 RaceBoxModel::currentDeltaMs() const
+{
+    if (!m_lapTimerRunning || m_bestLapTrace.isEmpty())
+        return 0;
+    return currentLapMs() - referenceElapsedAtDistance(m_currentLapDistanceM);
+}
+
+qint64 RaceBoxModel::referenceElapsedAtDistance(double distanceM) const
+{
+    const auto it = std::lower_bound(m_bestLapTrace.begin(), m_bestLapTrace.end(), distanceM,
+                                     [](const Sample &s, double d) { return s.distanceM < d; });
+    if (it == m_bestLapTrace.begin())
+        return m_bestLapTrace.first().elapsedMs;
+    if (it == m_bestLapTrace.end())
+        return m_bestLapTrace.last().elapsedMs;
+
+    const Sample &s0 = *(it - 1), &s1 = *it;
+    const double d0 = s0.distanceM, d1 = s1.distanceM;
+    const qint64 t0 = s0.elapsedMs, t1 = s1.elapsedMs;
+    if (d1 <= d0) return t0; // degenerate zero-length span between samples
+
+    const double frac = (distanceM - d0) / (d1 - d0);
+    return t0 + static_cast<qint64>(frac * double(t1 - t0));
 }
 
 RaceBoxModel::LapTimerState RaceBoxModel::lapTimerState() const
@@ -150,13 +177,22 @@ void RaceBoxModel::onData(const RaceBoxData &d)
         const qint64 nowMs  = m_clock.elapsed();
 
         if (m_havePrevFix) {
+            const double stepM = haversineM(m_lastLat, m_lastLon, curLat, curLon);
+
             // Refresh the travel heading when the car has moved appreciably.
-            if (haversineM(m_lastLat, m_lastLon, curLat, curLon) > 0.5) {
+            if (stepM > 0.5) {
                 m_headingRad  = bearingRad(m_lastLat, m_lastLon, curLat, curLon);
                 m_haveHeading = true;
             }
+            // Distance-since-lap-start, used to look up the reference lap's
+            // elapsed time at the same point on track (see currentDeltaMs()).
+            // Add the whole segment first; if this fix crosses the finish line,
+            // updateLapTiming() rebases the counter to just the post-crossing
+            // portion, so the new lap's distance and time share one origin.
+            if (m_lapTimerRunning)
+                m_currentLapDistanceM += stepM;
             updateLapTiming(m_lastLat, m_lastLon, curLat, curLon,
-                            static_cast<double>(kmhInt), m_prevFixMs, nowMs);
+                            static_cast<double>(kmhInt), m_prevFixMs, nowMs, stepM);
         }
 
         m_lastLat = curLat;
@@ -173,6 +209,7 @@ void RaceBoxModel::onData(const RaceBoxData &d)
                 m_currentLapPath.append(d.longitude);
                 m_lastStoredLat = d.latitude;
                 m_lastStoredLon = d.longitude;
+                m_currentLapTrace.append({m_currentLapDistanceM, nowMs - m_lapStartMs});
             }
         }
     }
@@ -181,7 +218,7 @@ void RaceBoxModel::onData(const RaceBoxData &d)
 }
 
 void RaceBoxModel::updateLapTiming(double prevLat, double prevLon, double curLat, double curLon,
-                                  double speedKmh, qint64 prevMs, qint64 nowMs)
+                                  double speedKmh, qint64 prevMs, qint64 nowMs, double stepM)
 {
     if (!m_finishLineSet) return;
     if (speedKmh <= kMinCrossSpeedKmh) return; // stationary GPS jitter — ignore
@@ -227,6 +264,10 @@ void RaceBoxModel::updateLapTiming(double prevLat, double prevLon, double curLat
 
     // Sub-sample crossing time: interpolate between the two fix arrival times.
     const qint64 crossMs = prevMs + static_cast<qint64>(t * static_cast<double>(nowMs - prevMs));
+    // Portion of this segment travelled AFTER the crossing point (fraction t
+    // along prev→cur). The finishing lap ends at crossMs/here minus this;
+    // the new lap starts its distance count from exactly this much.
+    const double postCrossM = (1.0 - t) * stepM;
 
     // Debounce: reject a second crossing that arrives implausibly soon (GPS jitter
     // straddling the line on consecutive fixes).
@@ -236,17 +277,26 @@ void RaceBoxModel::updateLapTiming(double prevLat, double prevLon, double curLat
         const qint64 lapMs = crossMs - m_lapStartMs;
         m_lastLapMs = lapMs;
         m_dirty |= kDirtyLastLap;
+        // Close the trace exactly at the finish line so a following lap's delta
+        // lookup never runs past the last sample (which would freeze the
+        // reference and inflate the delta in the final metres).
+        m_currentLapTrace.append({m_currentLapDistanceM - postCrossM, lapMs});
         QVariantList pathList;
         pathList.reserve(m_currentLapPath.size());
         for (double v : m_currentLapPath)
             pathList.append(v);
         emit lapCompleted(lapMs, pathList);
-        m_currentLapPath.clear();
         const bool newBest = (m_bestLapMs == 0 || lapMs < m_bestLapMs);
         if (newBest) {
             m_bestLapMs = lapMs;
             m_dirty |= kDirtyBestLap;
+            // This lap becomes the position-matched benchmark the next lap's
+            // live delta (currentDeltaMs) is compared against. Move, not copy —
+            // m_currentLapTrace is cleared immediately below either way.
+            m_bestLapTrace = std::move(m_currentLapTrace);
         }
+        m_currentLapPath.clear();
+        m_currentLapTrace.clear();
         qCInfo(lcRaceBox) << "Lap" << m_lapNumber << "completed:"
                           << lapMs / 60000 << "m"
                           << (lapMs % 60000) / 1000.0 << "s"
@@ -257,6 +307,12 @@ void RaceBoxModel::updateLapTiming(double prevLat, double prevLon, double curLat
     m_lapStartMs = crossMs;
     m_lapTimerRunning = true;
     m_hasStartedTiming = true; // sticky; lapTimerState() transitions handled at notify time
+    // New lap's distance starts at the line, not at this fix — carry only the
+    // post-crossing portion of the segment. Seed the trace with the origin
+    // sample so the delta lookup interpolates from (0 m, 0 ms) rather than
+    // clamping to the first decimated point.
+    m_currentLapDistanceM = postCrossM;
+    m_currentLapTrace.append({0.0, 0});
 }
 
 double RaceBoxModel::haversineM(double lat1, double lon1, double lat2, double lon2)
@@ -276,6 +332,9 @@ void RaceBoxModel::resetLapState()
     m_lastLapMs       = 0;
     m_bestLapMs       = 0;
     m_currentLapPath.clear();
+    m_currentLapDistanceM = 0.0;
+    m_currentLapTrace.clear();
+    m_bestLapTrace.clear();
     m_dirty |= kDirtyLapNumber | kDirtyLastLap | kDirtyBestLap | kDirtyCurrentLap;
 }
 
@@ -314,7 +373,7 @@ void RaceBoxModel::emitNotifications()
     if (dirty & kDirtyFix)        emit hasFixChanged();
     if (dirty & kDirtySvs)        emit satellitesChanged();
     if (dirty & kDirtyLapNumber)  emit lapNumberChanged();
-    if (dirty & kDirtyCurrentLap) emit currentLapMsChanged();
+    if (dirty & kDirtyCurrentLap) { emit currentLapMsChanged(); emit currentDeltaMsChanged(); }
     if (dirty & kDirtyLastLap)    emit lastLapMsChanged();
     if (dirty & kDirtyBestLap)    emit bestLapMsChanged();
     if (dirty & kDirtyGForce)     { emit gForceXChanged(); emit gForceYChanged(); emit gForceZChanged(); }

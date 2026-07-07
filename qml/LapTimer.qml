@@ -64,12 +64,12 @@ Rectangle {
                 font.family: "monospace"
             }
 
-            // Delta vs best lap — only shown once a best exists
+            // Live delta vs best lap at the same distance traveled — only
+            // shown once a best exists (see RaceBoxModel::currentDeltaMs).
             Text {
                 visible: raceBoxModel.bestLapMs > 0
-                readonly property int deltaMs: raceBoxModel.currentLapMs - raceBoxModel.bestLapMs
-                text: formatDelta(deltaMs)
-                color: deltaMs <= 0 ? "#00cc44" : "#cc2222"
+                text: formatDelta(raceBoxModel.currentDeltaMs)
+                color: raceBoxModel.currentDeltaMs <= 0 ? "#00cc44" : "#cc2222"
                 font.pixelSize: 16
                 font.bold: true
                 font.family: "monospace"
