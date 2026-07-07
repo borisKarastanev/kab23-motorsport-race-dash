@@ -27,9 +27,11 @@ public:
     Q_PROPERTY(qint64  currentLapMs   READ currentLapMs   NOTIFY currentLapMsChanged)
     Q_PROPERTY(qint64  lastLapMs      READ lastLapMs      NOTIFY lastLapMsChanged)
     Q_PROPERTY(qint64  bestLapMs      READ bestLapMs      NOTIFY bestLapMsChanged)
-    // Live delta vs the best lap at the SAME distance traveled since the lap
-    // start (not the same wall-clock instant) — negative/green = ahead of the
-    // best lap's pace at this point on track, positive/red = behind it.
+    // Live delta vs the best lap at the SAME point on track — the reference
+    // time is read at the geographically nearest point on the best lap's path,
+    // not at the same wall-clock instant nor the same distance travelled, so a
+    // different racing line doesn't desync the comparison. Negative/green =
+    // ahead of the best lap's pace at this point on track, positive/red = behind.
     Q_PROPERTY(qint64  currentDeltaMs READ currentDeltaMs NOTIFY currentDeltaMsChanged)
     Q_PROPERTY(double  gForceX        READ gForceX        NOTIFY gForceXChanged)
     Q_PROPERTY(double  gForceY        READ gForceY        NOTIFY gForceYChanged)
@@ -127,12 +129,12 @@ private:
     // Tests whether the path segment (prev fix → current fix) crosses the
     // finish-line gate; on a crossing it interpolates the exact crossing time
     // between the two fixes and completes/starts a lap. prevMs/nowMs are the
-    // fix arrival times (from m_clock) used for that interpolation. stepM is the
-    // segment's length; on a crossing it is split at the interpolated crossing
-    // point so the finishing lap's distance ends, and the new lap's distance
-    // starts, exactly at the line rather than at a fix boundary.
+    // fix arrival times (from m_clock) used for that interpolation. The exact
+    // crossing point (fraction t along prev→cur) anchors the finishing lap's
+    // closing trace sample and the new lap's origin sample to the line rather
+    // than to a fix boundary.
     void updateLapTiming(double prevLat, double prevLon, double curLat, double curLon,
-                         double speedKmh, qint64 prevMs, qint64 nowMs, double stepM);
+                         double speedKmh, qint64 prevMs, qint64 nowMs);
     // Builds a gate perpendicular to the recent direction of travel, centred on
     // (lat, lon), and writes its two endpoints to the out-params.
     void gateFromHeading(double lat, double lon,
@@ -141,10 +143,12 @@ private:
     // timer, and current-lap path. Does not touch m_hasStartedTiming or the
     // finish-line fields; callers handle those themselves.
     void resetLapState();
-    // Interpolates the best lap's elapsed time at the given distance-since-
-    // start, by binary-searching m_bestLapTrace (distance monotonically
-    // increasing). Clamps to the first/last sample past either end.
-    qint64 referenceElapsedAtDistance(double distanceM) const;
+    // Interpolates the best lap's elapsed time at the point on its recorded
+    // path geographically nearest to (lat, lon), by projecting onto the nearest
+    // trace segment. Searches a forward-biased window around the last match
+    // (m_refMatchIdx) so a self-intersecting track / the S/F wrap matches the
+    // right pass, falling back to a full rescan when the window misses.
+    qint64 referenceElapsedAtPosition(double lat, double lon) const;
 
     // Connection / fix
     bool   m_connected   = false;
@@ -169,16 +173,19 @@ private:
     double          m_lastStoredLat = 0.0;
     double          m_lastStoredLon = 0.0;
 
-    // Live-delta tracking: distance traveled since this lap's start crossing
-    // (accumulated every fix), plus — at the same distance-decimated cadence
-    // as m_currentLapPath — a (distance, elapsed-ms) trace. When this lap
-    // finishes as a new best, its trace becomes the reference (m_bestLapTrace)
-    // the next lap's delta is measured against, position-for-position rather
-    // than by raw elapsed time.
-    struct Sample { double distanceM; qint64 elapsedMs; };
-    double          m_currentLapDistanceM = 0.0;
+    // Live-delta tracking: a (lat, lon, elapsed-ms) trace recorded at the same
+    // distance-decimated cadence as m_currentLapPath. When this lap finishes as
+    // a new best, its trace becomes the reference (m_bestLapTrace) the next
+    // lap's delta is measured against — position-for-position, by projecting the
+    // live position onto the nearest reference segment, rather than by raw
+    // elapsed time or cumulative distance.
+    struct Sample { double lat; double lon; qint64 elapsedMs; };
     QVector<Sample> m_currentLapTrace;
     QVector<Sample> m_bestLapTrace;
+    // Anchor segment index for the reference nearest-point search; advances with
+    // the car and resets to 0 at each lap start. Mutable: the search is driven
+    // from the const currentDeltaMs() getter.
+    mutable int     m_refMatchIdx = 0;
 
     // Finish line as a gate: segment A→B spanning the track width. A lap is
     // timed when the path (prev→cur fix) crosses this segment.
