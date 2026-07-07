@@ -39,7 +39,9 @@ Item {
     Rectangle {
         id: panel
         anchors.centerIn: parent
-        width: Math.min(420, root.width - 40)
+        // 560 fits OnScreenKeyboard's widest row (10 keys + spacing) plus
+        // margins at its current key sizes — bump this if those change.
+        width: Math.min(560, root.width - 40)
         height: contentColumn.height + 32
         color: "#0d0d0d"
         border.color: "#2a2a2a"
