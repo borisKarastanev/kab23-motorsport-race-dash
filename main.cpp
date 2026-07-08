@@ -2,12 +2,14 @@
 #include <QQmlApplicationEngine>
 #include <QQmlContext>
 #include <QQmlEngine>
+#include <QQuickWindow>
 #include <QMetaType>
 #include <QCommandLineParser>
 #include <QCursor>
 
 #include "src/realcanprovider.h"
 #include "src/mockcanprovider.h"
+#include "src/sdnotify.h"
 #include "src/candatamodel.h"
 #include "src/dashconfig.h"
 #include "src/raceboxmodel.h"
@@ -136,6 +138,24 @@ int main(int argc, char *argv[])
 
     if (engine.rootObjects().isEmpty())
         return -1;
+
+    // Tell systemd (Type=notify) we're ready exactly once the first frame has
+    // been presented, so its ExecStartPost=plymouth quit can't race ahead of us
+    // and leave a black gap between the boot splash and the dashboard.
+    // frameSwapped() fires *after* the buffer has been swapped to screen —
+    // unlike afterRendering(), which fires before the swap and would let the
+    // splash be dismissed a frame early. It's emitted on the render thread, but
+    // since the receiver context is the window (main-thread affinity) the call
+    // is delivered queued on the main thread; either way sdNotifyReady() only
+    // touches a plain OS socket and is safe to call from any thread.
+    // Qt::SingleShotConnection (Qt 6.0+) disconnects after the first emission —
+    // we only need this once per run.
+    if (auto *window = qobject_cast<QQuickWindow *>(engine.rootObjects().constFirst()))
+        QObject::connect(window, &QQuickWindow::frameSwapped, window,
+                          &sdNotifyReady, Qt::SingleShotConnection);
+    else
+        sdNotifyReady(); // no window to hook (shouldn't happen) — notify anyway so
+                         // systemd doesn't wait out the full start timeout for nothing
 
     canProvider->start();
     raceBoxProvider->start();
