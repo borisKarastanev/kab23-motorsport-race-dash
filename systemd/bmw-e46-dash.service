@@ -9,6 +9,13 @@ Description=BMW E46 Race Dashboard
 # connects rather than sitting on a black screen.
 After=plymouth-start.service
 Wants=can0.service bluetooth.service
+# StartLimitIntervalSec/StartLimitBurst must live here in [Unit], not
+# [Service] — they were silently ignored ("Unknown key ... ignoring") in
+# [Service] before this, so Restart=on-failure below had no circuit breaker:
+# a stuck first-frame (TimeoutStartSec=20) would have restarted every 5s
+# forever instead of giving up after 3 attempts in 60s.
+StartLimitIntervalSec=60
+StartLimitBurst=3
 
 [Service]
 User=@DASHBOARD_USER@
@@ -39,8 +46,6 @@ TimeoutStartSec=20
 ExecStartPost=-/usr/bin/plymouth quit
 Restart=on-failure
 RestartSec=5
-StartLimitIntervalSec=60
-StartLimitBurst=3
 
 [Install]
 WantedBy=multi-user.target
