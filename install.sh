@@ -7,7 +7,22 @@ USER_HOME=$(getent passwd "$DASHBOARD_USER" | cut -d: -f6)
 CAN_SERVICE="can0.service"
 DASH_SERVICE="bmw-e46-dash.service"
 
-echo "=== Installing dependencies ==="
+# Per-step timing: measure which "=== ... ===" section actually dominates
+# install/update time instead of going on feel. Prints the previous section's
+# elapsed time (via bash's builtin $SECONDS, 1s resolution — plenty for
+# multi-second apt/plymouth steps) right before announcing the next one.
+_step_start=$SECONDS
+_step_name=""
+step() {
+    if [ -n "$_step_name" ]; then
+        echo "    (${_step_name}: $((SECONDS - _step_start))s)"
+    fi
+    _step_name="$1"
+    _step_start=$SECONDS
+    echo "=== $1 ==="
+}
+
+step "Installing dependencies"
 sudo apt install -y \
     qt6-base-dev \
     qt6-declarative-dev \
@@ -19,14 +34,14 @@ sudo apt install -y \
     libegl-mesa0 \
     libgl1-mesa-dri
 
-echo "=== Priming fontconfig cache ==="
+step "Priming fontconfig cache"
 # Qt builds the fontconfig cache on the first launch after a fresh image flash
 # — a 1-3s one-time hit that would otherwise land on the dashboard's very
 # first boot. The UI is all font.family: "monospace", so this is worth
 # priming here instead of paying for it live.
 fc-cache -f
 
-echo "=== Building application ==="
+step "Building application"
 mkdir -p "$REPO_DIR/build"
 chown -R "$DASHBOARD_USER:$DASHBOARD_USER" "$REPO_DIR/build"
 # Unlink the previous binary before relinking — if this script is run as an
@@ -38,7 +53,7 @@ rm -f "$REPO_DIR/build/bmw-e46-dash"
 # tree via configure_file, which fails when running as root.
 sudo -u "$DASHBOARD_USER" bash -c "cd '$REPO_DIR/build' && cmake .. -DCMAKE_BUILD_TYPE=Release && make -j\$(nproc)"
 
-echo "=== Enabling NetworkManager control for the dashboard user ==="
+step "Enabling NetworkManager control for the dashboard user"
 # Network Connection settings shell out to nmcli as the dashboard user (no
 # sudo). netdev group membership is what nmcli's polkit policy normally
 # checks, but the dashboard runs as a systemd service with no active logind
@@ -56,7 +71,7 @@ polkit.addRule(function(action, subject) {
 });
 RULES
 
-echo "=== Enabling Bluetooth adapter ==="
+step "Enabling Bluetooth adapter"
 rfkill unblock bluetooth || true
 # Drop-in for bluetooth.service: unblock rfkill just before bluetoothd starts.
 # More reliable than a standalone service — runs at exactly the right time.
@@ -71,7 +86,7 @@ sudo rm -f /etc/systemd/system/bluetooth-unblock.service
 sudo systemctl daemon-reload
 sudo systemctl restart bluetooth.service || true
 
-echo "=== Enabling persistent journald logging ==="
+step "Enabling persistent journald logging"
 # By default Raspberry Pi OS uses volatile storage (/run/log/journal) — logs
 # are lost on power-off. Creating /var/log/journal makes journald switch to
 # persistent mode (Storage=auto picks it up without editing journald.conf).
@@ -87,21 +102,21 @@ MaxRetentionSec=2week
 JOURNALD
 sudo systemctl restart systemd-journald
 
-echo "=== Installing systemd CAN service ==="
+step "Installing systemd CAN service"
 sudo cp "$REPO_DIR/systemd/$CAN_SERVICE" /etc/systemd/system/
 sudo systemctl daemon-reload
 sudo systemctl enable "$CAN_SERVICE"
 # Note: 'non-existent unit dev-ttyACM0.device' warning above is expected —
 # that unit is created by udev only when the USB2CAN adapter is plugged in.
 
-echo "=== Installing dashboard system service (console/eglfs mode) ==="
+step "Installing dashboard system service (console/eglfs mode)"
 sed "s|@INSTALL_DIR@|$REPO_DIR|g; s|@DASHBOARD_USER@|$DASHBOARD_USER|g" \
     "$REPO_DIR/systemd/$DASH_SERVICE" \
     | sudo tee /etc/systemd/system/$DASH_SERVICE > /dev/null
 sudo systemctl daemon-reload
 sudo systemctl enable "$DASH_SERVICE"
 
-echo "=== Configuring clean console boot (kiosk display) ==="
+step "Configuring clean console boot (kiosk display)"
 # The dashboard drives the DSI panel directly through Qt eglfs (bare KMS), so it
 # must be the sole DRM master. Two things otherwise fight it for the screen:
 #   1. The graphical desktop (labwc/Wayland). If the Pi boots to desktop, the
@@ -162,7 +177,7 @@ boot_delay=0
 BOOTCFG
 fi
 
-echo "=== Installing Plymouth boot splash ==="
+step "Installing Plymouth boot splash"
 # This is a separate boot stage from disable_splash above (that's the GPU
 # firmware's rainbow test-card, shown before the kernel even starts; Plymouth
 # runs from the initramfs right after). Ships our own small theme
@@ -204,7 +219,7 @@ sudo cp -r "$REPO_DIR/plymouth/race-dash" /usr/share/plymouth/themes/race-dash
 sudo plymouth-set-default-theme -R race-dash \
     || echo "WARNING: plymouth-set-default-theme failed (initramfs regen?); boot splash may not appear — continuing install."
 
-echo "=== Trimming boot-irrelevant units ==="
+step "Trimming boot-irrelevant units"
 # This is a dedicated car dashboard, not a general-purpose desktop — these
 # units cost boot time for capabilities the device never uses. Each is
 # `disable --now`, not `mask`, so it's trivially reversible, and each
@@ -226,7 +241,7 @@ sudo systemctl disable --now apt-daily.timer apt-daily-upgrade.timer man-db.time
 sudo systemctl disable --now ModemManager.service triggerhappy.service 2>/dev/null || true
 sudo systemctl disable --now dphys-swapfile.service rpi-eeprom-update.service 2>/dev/null || true
 
-echo "=== Installing XDG autostart (desktop/Wayland/X11 mode) ==="
+step "Installing XDG autostart (desktop/Wayland/X11 mode)"
 # NOTE: console boot is enforced above, so this desktop-session autostart is
 # inert on a normally-provisioned device. It only takes effect if someone later
 # re-enables the desktop (systemctl set-default graphical.target) — in which
@@ -244,7 +259,7 @@ chown -R "$DASHBOARD_USER:$DASHBOARD_USER" "$AUTOSTART_DIR"
 echo "Autostart file: $AUTOSTART_DIR/bmw-e46-dash.desktop"
 
 echo ""
-echo "=== Done ==="
+step "Done"
 echo "User: $DASHBOARD_USER  |  Install dir: $REPO_DIR"
 echo ""
 echo "Provisioned for console boot: the systemd service drives the panel via"
@@ -260,3 +275,6 @@ echo ""
 echo "To view dashboard logs (persisted across reboots):"
 echo "  journalctl -u bmw-e46-dash"
 echo "  journalctl -u bmw-e46-dash --since '2025-06-18 22:00'"
+echo ""
+echo "    (${_step_name}: $((SECONDS - _step_start))s)"
+echo "Total install.sh time: ${SECONDS}s"
