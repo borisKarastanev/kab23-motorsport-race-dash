@@ -126,7 +126,9 @@ if [ -f "$CMDLINE" ]; then
     # Move the framebuffer console off the panel (tty1 -> tty3) and quiet the
     # boot so no kernel text is drawn on screen.
     sudo sed -i 's/\bconsole=tty1\b/console=tty3/g' "$CMDLINE"
-    for tok in quiet loglevel=3 logo.nologo vt.global_cursor_default=0; do
+    # "splash" is what tells Plymouth (installed below) to actually draw its
+    # graphical splash instead of running invisibly.
+    for tok in quiet splash loglevel=3 logo.nologo vt.global_cursor_default=0; do
         sudo grep -qw -- "$tok" "$CMDLINE" || sudo sed -i "1 s|\$| $tok|" "$CMDLINE"
     done
 fi
@@ -146,6 +148,36 @@ disable_splash=1
 # --- end race-dash boot ---
 BOOTCFG
 fi
+
+echo "=== Installing Plymouth boot splash ==="
+# This is a separate boot stage from disable_splash above (that's the GPU
+# firmware's rainbow test-card, shown before the kernel even starts; Plymouth
+# runs from the initramfs right after). Ships our own small theme
+# (plymouth/race-dash/ — a "LOADING..." animation matching the dashboard's
+# dark HUD look) instead of a stock one, so the panel goes straight from black
+# to that to the running dashboard, with no console text or login prompt
+# in between (see the console-boot section above for those).
+#
+# The dashboard's own systemd unit (Type=notify) is what makes the handoff
+# race-free: it signals readiness only after its first QML frame is actually
+# on screen (see main.cpp / sdnotify.cpp), and only then does
+# ExecStartPost=plymouth quit in bmw-e46-dash.service dismiss the splash — so
+# it can't be dismissed early and leave a black gap before the dashboard.
+#
+# plymouth-set-default-theme -R both selects the theme and regenerates the
+# initramfs so it's baked into the next boot; on Raspberry Pi OS this also
+# updates config.txt's `initramfs` line automatically via the raspi-firmware
+# package hooks. plymouth-themes is a fallback in case this custom theme ever
+# fails to install correctly.
+sudo apt install -y plymouth plymouth-themes
+sudo rm -rf /usr/share/plymouth/themes/race-dash
+sudo cp -r "$REPO_DIR/plymouth/race-dash" /usr/share/plymouth/themes/race-dash
+# Tolerate failure of this step (under `set -e`): -R regenerates the initramfs,
+# which can fail on setups where the update-initramfs / raspi-firmware hook is
+# unhappy. A missing splash is cosmetic — don't abort the rest of provisioning
+# (systemd units, autostart) over it.
+sudo plymouth-set-default-theme -R race-dash \
+    || echo "WARNING: plymouth-set-default-theme failed (initramfs regen?); boot splash may not appear — continuing install."
 
 echo "=== Installing XDG autostart (desktop/Wayland/X11 mode) ==="
 # NOTE: console boot is enforced above, so this desktop-session autostart is
@@ -169,8 +201,9 @@ echo "=== Done ==="
 echo "User: $DASHBOARD_USER  |  Install dir: $REPO_DIR"
 echo ""
 echo "Provisioned for console boot: the systemd service drives the panel via"
-echo "eglfs, and the desktop/console are suppressed so users see only the"
-echo "dashboard (black screen -> dashboard, no login prompt, no boot text)."
+echo "eglfs, and the desktop/console are suppressed so users see only a"
+echo "Plymouth \"LOADING...\" splash, then the dashboard — no login prompt,"
+echo "no boot text, no unindicated blank screen."
 echo ""
 echo "*** A REBOOT is required for the boot-display changes to take effect. ***"
 echo ""

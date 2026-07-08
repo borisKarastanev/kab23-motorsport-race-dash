@@ -31,6 +31,7 @@ add_executable(bmw-e46-dash
     src/devicestatsmodel.cpp
     src/updatemodel.cpp
     src/networkmodel.cpp
+    src/sdnotify.cpp
     ${RESOURCES}
 )
 

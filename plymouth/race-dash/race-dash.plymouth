@@ -1,0 +1,18 @@
+[Plymouth Theme]
+Name=Race Dash
+Description=Boot splash for the BMW E46 race dashboard — LOADING with animated dots, matching the app's dark HUD look.
+ModuleName=two-step
+
+[two-step]
+ImageDir=/usr/share/plymouth/themes/race-dash
+HorizontalAlignment=.5
+VerticalAlignment=.5
+Transition=none
+TransitionDuration=0.0
+BackgroundStartColor=0x0a0a0a
+BackgroundEndColor=0x0a0a0a
+ProgressBarBackgroundColor=0x0a0a0a
+ProgressBarForegroundColor=0xcccccc
+
+[boot-up]
+UseEndAnimation=false

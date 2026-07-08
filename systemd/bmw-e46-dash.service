@@ -1,6 +1,6 @@
 [Unit]
 Description=BMW E46 Race Dashboard
-After=can0.service bluetooth.service
+After=can0.service bluetooth.service plymouth-start.service
 Wants=can0.service
 
 [Service]
@@ -10,6 +10,18 @@ Environment=QT_QPA_PLATFORM=eglfs
 Environment=QT_QPA_EGLFS_PHYSICAL_WIDTH=155
 Environment=QT_QPA_EGLFS_PHYSICAL_HEIGHT=86
 ExecStart=@INSTALL_DIR@/build/bmw-e46-dash --kiosk
+# Type=notify + the app's own sd_notify(READY=1) (sent after its first frame
+# is actually on screen — see main.cpp) is what makes ExecStartPost below
+# race-free: systemd only runs it once that signal arrives, so the boot
+# splash can't be dismissed before the dashboard has something to show.
+Type=notify
+NotifyAccess=main
+# Cap the READY=1 handshake. If the first frame never lands — e.g. eglfs can't
+# take the DRM master because Plymouth still holds it — systemd would otherwise
+# block on the start job for the full default (90s) with the splash stuck. Fail
+# fast instead so Restart=on-failure below can recover.
+TimeoutStartSec=20
+ExecStartPost=-/usr/bin/plymouth quit
 Restart=on-failure
 RestartSec=5
 StartLimitIntervalSec=60
