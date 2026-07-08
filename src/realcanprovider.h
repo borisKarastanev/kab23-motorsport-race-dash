@@ -15,8 +15,10 @@ public:
 private:
     void onFramesReceived();
     void onErrorOccurred(QCanBusDevice::CanBusError error);
+    void scheduleRetry(const QString &reason);
 
 private:
     QCanBusDevice *m_device           = nullptr;
     bool           m_firstFrameLogged = false;
+    bool           m_retryScheduled   = false;
 };
