@@ -249,8 +249,15 @@ void NetworkModel::checkNmAvailable()
     runNmcli({"-t", "-f", "RUNNING", "general", "status"}, 5000,
         [this](bool ok, int, const QString &out) {
             m_nmAvailable = ok && out.trimmed().compare("running", Qt::CaseInsensitive) == 0;
-            if (!m_nmAvailable)
-                qCInfo(lcApp) << "NetworkManager not available — Network Connection settings disabled";
+            if (!m_nmAvailable) {
+                // NetworkManager.service can still be starting up this early in
+                // boot — the dash now paints well before it used to, so this can
+                // lose the race on first check. Retry instead of disabling the
+                // Network Connection feature for the rest of the process
+                // lifetime, mirroring RealCanProvider's can0-not-ready retry.
+                qCInfo(lcApp) << "NetworkManager not available yet — retrying in 3 s";
+                QTimer::singleShot(3000, this, &NetworkModel::checkNmAvailable);
+            }
             emit statusChanged();
             if (m_nmAvailable)
                 pollTick();
