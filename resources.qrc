@@ -1,6 +1,37 @@
 <!DOCTYPE RCC>
 <RCC version="1.0">
     <qresource prefix="/">
+        <file>qml/TimeFormat.js</file>
+        <file>qml/main.qml</file>
+        <file>qml/DashboardView.qml</file>
+        <file>qml/SettingsView.qml</file>
+        <file>qml/SettingsMenu.qml</file>
+        <file>qml/SettingsDetail.qml</file>
+        <file>qml/settings/PlaceholderSetting.qml</file>
+        <file>qml/settings/SessionsList.qml</file>
+        <file>qml/settings/SessionGroupsList.qml</file>
+        <file>qml/settings/SessionSummary.qml</file>
+        <file>qml/settings/TrackMap.qml</file>
+        <file>qml/settings/TracksBrowser.qml</file>
+        <file>qml/settings/DeviceInfoMenu.qml</file>
+        <file>qml/settings/AppVersionDetail.qml</file>
+        <file>qml/settings/DeviceStats.qml</file>
+        <file>qml/settings/DeviceLog.qml</file>
+        <file>qml/settings/NetworkMenu.qml</file>
+        <file>qml/settings/WifiIcon.qml</file>
+        <file>qml/settings/WifiDetail.qml</file>
+        <file>qml/settings/WifiPasswordModal.qml</file>
+        <file>qml/settings/WiredDetail.qml</file>
+        <file>qml/settings/PasswordEntryModal.qml</file>
+        <file>qml/settings/PasswordModal.qml</file>
+        <file>qml/settings/OnScreenKeyboard.qml</file>
+        <file>qml/settings/TextButton.qml</file>
+        <file>qml/settings/StatRow.qml</file>
+        <file>qml/Gauge.qml</file>
+        <file>qml/GearIndicator.qml</file>
+        <file>qml/LedStrip.qml</file>
+        <file>qml/LapTimer.qml</file>
+        <file>qml/StatusBar.qml</file>
         <file>data/track-db.json</file>
     </qresource>
 </RCC>

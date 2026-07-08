@@ -49,7 +49,7 @@ Item {
                     id: rowArea
                     anchors.fill: parent
                     onClicked: {
-                        root.stackView.push("qrc:/qt/qml/RaceDash/qml/SettingsDetail.qml", {
+                        root.stackView.push("qrc:/qml/SettingsDetail.qml", {
                             settingKey: itemKey,
                             title: itemTitle
                         })

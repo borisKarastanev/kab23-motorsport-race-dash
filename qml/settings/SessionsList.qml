@@ -47,7 +47,7 @@ Item {
                     id: rowArea
                     anchors.fill: parent
                     onClicked: {
-                        stackView.push("qrc:/qt/qml/RaceDash/qml/SettingsDetail.qml", {
+                        stackView.push("qrc:/qml/SettingsDetail.qml", {
                             settingKey: "session-summary",
                             title: modelData.title,
                             payload: modelData
