@@ -1,7 +1,21 @@
 [Unit]
 Description=BMW E46 Race Dashboard
-After=can0.service bluetooth.service plymouth-start.service
-Wants=can0.service
+# No After= on can0/bluetooth: can0 is BindsTo=dev-ttyACM0.device, and systemd's
+# default 90s device-job timeout means an absent/slow USB2CAN adapter would block
+# the dash's start job for up to 90s if we waited on it. Wants= still pulls both
+# into boot so they start in parallel with the dash instead of gating it —
+# RealCanProvider now retries every 3s until can0 exists (see
+# realcanprovider.cpp), so the app just paints without live data until it
+# connects rather than sitting on a black screen.
+After=plymouth-start.service
+Wants=can0.service bluetooth.service
+# StartLimitIntervalSec/StartLimitBurst must live here in [Unit], not
+# [Service] — they were silently ignored ("Unknown key ... ignoring") in
+# [Service] before this, so Restart=on-failure below had no circuit breaker:
+# a stuck first-frame (TimeoutStartSec=20) would have restarted every 5s
+# forever instead of giving up after 3 attempts in 60s.
+StartLimitIntervalSec=60
+StartLimitBurst=3
 
 [Service]
 User=@DASHBOARD_USER@
@@ -9,6 +23,18 @@ SupplementaryGroups=video render input bluetooth
 Environment=QT_QPA_PLATFORM=eglfs
 Environment=QT_QPA_EGLFS_PHYSICAL_WIDTH=155
 Environment=QT_QPA_EGLFS_PHYSICAL_HEIGHT=86
+# Naming the eglfs backend explicitly skips Qt's runtime auto-detection probe
+# of the available platform integrations; suppressing qt.qpa.* logging drops
+# a small amount of serial-console log I/O on every boot.
+Environment=QT_QPA_EGLFS_INTEGRATION=eglfs_kms
+Environment=QT_LOGGING_RULES=qt.qpa.*=false
+# Plymouth stops drawing and releases the DRM master, but leaves its last
+# splash frame on screen (the KMS plane isn't torn down) — so eglfs can take
+# the master and render immediately, with no black gap between "splash frame
+# frozen" and "dashboard frame 1". install.sh masks the stock
+# plymouth-quit(-wait) units so this service is the only thing that ever
+# dismisses the splash.
+ExecStartPre=-/usr/bin/plymouth deactivate
 ExecStart=@INSTALL_DIR@/build/bmw-e46-dash --kiosk
 # Type=notify + the app's own sd_notify(READY=1) (sent after its first frame
 # is actually on screen — see main.cpp) is what makes ExecStartPost below
@@ -16,16 +42,15 @@ ExecStart=@INSTALL_DIR@/build/bmw-e46-dash --kiosk
 # splash can't be dismissed before the dashboard has something to show.
 Type=notify
 NotifyAccess=main
-# Cap the READY=1 handshake. If the first frame never lands — e.g. eglfs can't
-# take the DRM master because Plymouth still holds it — systemd would otherwise
-# block on the start job for the full default (90s) with the splash stuck. Fail
-# fast instead so Restart=on-failure below can recover.
+# Cap the READY=1 handshake. ExecStartPre=plymouth deactivate above means
+# eglfs should always be able to take the DRM master, but if the first frame
+# still never lands for some other reason, systemd would otherwise block the
+# start job for the full default (90s) with the splash stuck. Fail fast
+# instead so Restart=on-failure below can recover.
 TimeoutStartSec=20
 ExecStartPost=-/usr/bin/plymouth quit
 Restart=on-failure
 RestartSec=5
-StartLimitIntervalSec=60
-StartLimitBurst=3
 
 [Install]
 WantedBy=multi-user.target
