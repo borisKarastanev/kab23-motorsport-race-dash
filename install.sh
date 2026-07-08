@@ -163,6 +163,18 @@ echo "=== Installing Plymouth boot splash ==="
 # on screen (see main.cpp / sdnotify.cpp), and only then does
 # ExecStartPost=plymouth quit in bmw-e46-dash.service dismiss the splash — so
 # it can't be dismissed early and leave a black gap before the dashboard.
+# ExecStartPre=plymouth deactivate in that same unit releases the DRM master
+# before the app starts (leaving the splash's last frame on screen) so eglfs
+# never has to fight Plymouth for it.
+#
+# Mask the stock quit units so nothing else can dismiss the splash before our
+# unit does: plymouth-quit.service normally fires at multi-user.target,
+# independent of whether the dashboard has actually painted yet, which would
+# defeat the READY-gated handoff above (splash gone, dashboard not there yet
+# -> black gap). plymouth-quit-wait.service is masked alongside it since
+# nothing legitimately needs to block on the splash quitting (getty@tty1,
+# the only such consumer on a stock image, is already disabled above).
+sudo systemctl mask plymouth-quit.service plymouth-quit-wait.service
 #
 # plymouth-set-default-theme -R both selects the theme and regenerates the
 # initramfs so it's baked into the next boot; on Raspberry Pi OS this also

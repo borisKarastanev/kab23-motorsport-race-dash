@@ -16,6 +16,13 @@ SupplementaryGroups=video render input bluetooth
 Environment=QT_QPA_PLATFORM=eglfs
 Environment=QT_QPA_EGLFS_PHYSICAL_WIDTH=155
 Environment=QT_QPA_EGLFS_PHYSICAL_HEIGHT=86
+# Plymouth stops drawing and releases the DRM master, but leaves its last
+# splash frame on screen (the KMS plane isn't torn down) — so eglfs can take
+# the master and render immediately, with no black gap between "splash frame
+# frozen" and "dashboard frame 1". install.sh masks the stock
+# plymouth-quit(-wait) units so this service is the only thing that ever
+# dismisses the splash.
+ExecStartPre=-/usr/bin/plymouth deactivate
 ExecStart=@INSTALL_DIR@/build/bmw-e46-dash --kiosk
 # Type=notify + the app's own sd_notify(READY=1) (sent after its first frame
 # is actually on screen — see main.cpp) is what makes ExecStartPost below
@@ -23,10 +30,11 @@ ExecStart=@INSTALL_DIR@/build/bmw-e46-dash --kiosk
 # splash can't be dismissed before the dashboard has something to show.
 Type=notify
 NotifyAccess=main
-# Cap the READY=1 handshake. If the first frame never lands — e.g. eglfs can't
-# take the DRM master because Plymouth still holds it — systemd would otherwise
-# block on the start job for the full default (90s) with the splash stuck. Fail
-# fast instead so Restart=on-failure below can recover.
+# Cap the READY=1 handshake. ExecStartPre=plymouth deactivate above means
+# eglfs should always be able to take the DRM master, but if the first frame
+# still never lands for some other reason, systemd would otherwise block the
+# start job for the full default (90s) with the splash stuck. Fail fast
+# instead so Restart=on-failure below can recover.
 TimeoutStartSec=20
 ExecStartPost=-/usr/bin/plymouth quit
 Restart=on-failure
