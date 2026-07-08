@@ -204,26 +204,27 @@ step "Installing Plymouth boot splash"
 # the only such consumer on a stock image, is already disabled above).
 sudo systemctl mask plymouth-quit.service plymouth-quit-wait.service
 #
-# plymouth-themes is a fallback in case this custom theme ever fails to
-# install correctly.
+# plymouth-set-default-theme -R both selects the theme and regenerates the
+# initramfs so it's baked into the next boot; on Raspberry Pi OS this also
+# updates config.txt's `initramfs` line automatically via the raspi-firmware
+# package hooks. plymouth-themes is a fallback in case this custom theme ever
+# fails to install correctly.
+#
+# -R regenerates initramfs for every kernel flavor under /boot (on this
+# image, both rpi-v8 and rpi-2712) — tried scoping that to just the running
+# kernel via `-k "$(uname -r)"`, but Raspberry Pi OS's raspi-firmware hooks
+# regenerate both regardless (that's by design: it's what lets the same SD
+# card boot on Pi 3/4 or Pi 5/CM5), so the split bought nothing and just
+# added complexity. Back to plain -R.
 sudo apt install -y plymouth plymouth-themes
 sudo rm -rf /usr/share/plymouth/themes/race-dash
 sudo cp -r "$REPO_DIR/plymouth/race-dash" /usr/share/plymouth/themes/race-dash
-# plymouth-set-default-theme -R regenerates the initramfs for EVERY kernel
-# flavor installed under /boot — on Raspberry Pi OS's multi-board image
-# that's both rpi-v8 (Pi 3/4, what this device actually boots) AND rpi-2712
-# (Pi 5/CM5, which this hardware will never touch), roughly doubling this
-# step's cost to rebuild an initramfs that can never be used. Set the theme
-# only (no -R, no rebuild) here, then regenerate initramfs explicitly for
-# just the currently-running kernel below — same end result, half the work.
-sudo plymouth-set-default-theme race-dash \
-    || echo "WARNING: plymouth-set-default-theme failed; boot splash may not appear — continuing install."
-# Tolerate failure of this step (under `set -e`): it can fail on setups where
-# the update-initramfs / raspi-firmware hook is unhappy. A missing splash is
-# cosmetic — don't abort the rest of provisioning (systemd units, autostart)
-# over it.
-sudo update-initramfs -u -k "$(uname -r)" \
-    || echo "WARNING: update-initramfs failed; boot splash may not appear — continuing install."
+# Tolerate failure of this step (under `set -e`): -R regenerates the initramfs,
+# which can fail on setups where the update-initramfs / raspi-firmware hook is
+# unhappy. A missing splash is cosmetic — don't abort the rest of provisioning
+# (systemd units, autostart) over it.
+sudo plymouth-set-default-theme -R race-dash \
+    || echo "WARNING: plymouth-set-default-theme failed (initramfs regen?); boot splash may not appear — continuing install."
 
 step "Trimming boot-irrelevant units"
 # This is a dedicated car dashboard, not a general-purpose desktop — these
