@@ -134,17 +134,23 @@ if [ -f "$CMDLINE" ]; then
 fi
 
 if [ -f "$CONFIG" ]; then
-    # Suppress the rainbow splash the GPU draws before the kernel starts.
-    # Managed as a marked block under [all] — an unconditional filter appended
-    # last, so it overrides any earlier board-specific ([pi4]/[cm4]/…) or
-    # pre-existing disable_splash setting regardless of where the file ends.
+    # Suppress the rainbow splash the GPU draws before the kernel starts, and
+    # skip the firmware's default boot-settling delay. Managed as a marked
+    # block under [all] — an unconditional filter appended last, so it
+    # overrides any earlier board-specific ([pi4]/[cm4]/…) or pre-existing
+    # disable_splash/boot_delay setting regardless of where the file ends.
     # Removed and re-appended each run, so repeated installs/updates stay
     # idempotent instead of accumulating duplicate keys.
+    #
+    # arm_boost=1 (Pi 4 turbo clock during boot) is intentionally NOT set
+    # here yet — it needs confirming this board is actually a Pi 4 (vs. Pi 3)
+    # before it's safe to bake in; see boot-time-optimization.md Step 0.
     sudo sed -i '/^# --- race-dash boot (managed) ---$/,/^# --- end race-dash boot ---$/d' "$CONFIG"
     sudo tee -a "$CONFIG" > /dev/null << 'BOOTCFG'
 # --- race-dash boot (managed) ---
 [all]
 disable_splash=1
+boot_delay=0
 # --- end race-dash boot ---
 BOOTCFG
 fi
@@ -190,6 +196,28 @@ sudo cp -r "$REPO_DIR/plymouth/race-dash" /usr/share/plymouth/themes/race-dash
 # (systemd units, autostart) over it.
 sudo plymouth-set-default-theme -R race-dash \
     || echo "WARNING: plymouth-set-default-theme failed (initramfs regen?); boot splash may not appear — continuing install."
+
+echo "=== Trimming boot-irrelevant units ==="
+# This is a dedicated car dashboard, not a general-purpose desktop — these
+# units cost boot time for capabilities the device never uses. Each is
+# `disable --now`, not `mask`, so it's trivially reversible, and each
+# tolerates the unit being absent (varies by image) without aborting the
+# rest of provisioning under `set -e`.
+#
+# NetworkManager-wait-online.service is a boot GATE that blocks
+# network-online.target until a connection is confirmed — it does not bring
+# up networking itself (that still happens, just asynchronously). The
+# dashboard's NetworkModel polls nmcli on its own timer and has no
+# network-online.target ordering, so nothing here needs it.
+sudo systemctl disable --now NetworkManager-wait-online.service 2>/dev/null || true
+sudo systemctl disable --now systemd-networkd-wait-online.service 2>/dev/null || true
+# apt/man-db background timers, the cellular modem manager, the triggerhappy
+# hotkey daemon, and the SD-card swapfile service are all dead weight on a
+# device with no keyboard shortcuts, no modem, and (ideally) no swap thrash
+# against the SD card.
+sudo systemctl disable --now apt-daily.timer apt-daily-upgrade.timer man-db.timer 2>/dev/null || true
+sudo systemctl disable --now ModemManager.service triggerhappy.service 2>/dev/null || true
+sudo systemctl disable --now dphys-swapfile.service rpi-eeprom-update.service 2>/dev/null || true
 
 echo "=== Installing XDG autostart (desktop/Wayland/X11 mode) ==="
 # NOTE: console boot is enforced above, so this desktop-session autostart is
