@@ -134,7 +134,7 @@ int main(int argc, char *argv[])
     engine.rootContext()->setContextProperty("networkModel",    &networkModel);
     engine.rootContext()->setContextProperty("logBuffer",       &logBuffer);
     engine.rootContext()->setContextProperty("kioskMode",       kioskMode);
-    engine.load(QUrl(QStringLiteral("qrc:/qml/main.qml")));
+    engine.load(QUrl(QStringLiteral("qrc:/qt/qml/RaceDash/qml/main.qml")));
 
     if (engine.rootObjects().isEmpty())
         return -1;

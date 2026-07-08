@@ -19,6 +19,13 @@ sudo apt install -y \
     libegl-mesa0 \
     libgl1-mesa-dri
 
+echo "=== Priming fontconfig cache ==="
+# Qt builds the fontconfig cache on the first launch after a fresh image flash
+# — a 1-3s one-time hit that would otherwise land on the dashboard's very
+# first boot. The UI is all font.family: "monospace", so this is worth
+# priming here instead of paying for it live.
+fc-cache -f
+
 echo "=== Building application ==="
 mkdir -p "$REPO_DIR/build"
 chown -R "$DASHBOARD_USER:$DASHBOARD_USER" "$REPO_DIR/build"

@@ -23,6 +23,11 @@ SupplementaryGroups=video render input bluetooth
 Environment=QT_QPA_PLATFORM=eglfs
 Environment=QT_QPA_EGLFS_PHYSICAL_WIDTH=155
 Environment=QT_QPA_EGLFS_PHYSICAL_HEIGHT=86
+# Naming the eglfs backend explicitly skips Qt's runtime auto-detection probe
+# of the available platform integrations; suppressing qt.qpa.* logging drops
+# a small amount of serial-console log I/O on every boot.
+Environment=QT_QPA_EGLFS_INTEGRATION=eglfs_kms
+Environment=QT_LOGGING_RULES=qt.qpa.*=false
 # Plymouth stops drawing and releases the DRM master, but leaves its last
 # splash frame on screen (the KMS plane isn't torn down) — so eglfs can take
 # the master and render immediately, with no black gap between "splash frame
