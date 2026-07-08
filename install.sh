@@ -32,7 +32,8 @@ sudo apt install -y \
     libsocketcan2 \
     libxkbcommon-dev \
     libegl-mesa0 \
-    libgl1-mesa-dri
+    libgl1-mesa-dri \
+    ccache
 
 step "Priming fontconfig cache"
 # Qt builds the fontconfig cache on the first launch after a fresh image flash
