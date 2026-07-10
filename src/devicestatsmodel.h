@@ -77,4 +77,12 @@ private:
     QString m_vcgencmdPath; // empty if not found / not yet looked up
     bool m_vcgencmdSearched = false;
     QProcess *m_throttleProc = nullptr;
+
+    // Previous /proc/stat sample for computing instantaneous CPU% as a delta
+    // between polls (see pollCpuLoad()). Reset whenever the page (re)activates
+    // so the first tick after reopening never diffs across the time it was
+    // closed (polling stops entirely while inactive).
+    quint64 m_lastCpuTotal = 0;
+    quint64 m_lastCpuIdle  = 0;
+    bool    m_haveLastCpuSample = false;
 };

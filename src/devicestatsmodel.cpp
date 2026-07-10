@@ -2,8 +2,6 @@
 #include "logging.h"
 
 #include <QFile>
-#include <QTextStream>
-#include <QThread>
 #include <QStorageInfo>
 #include <QNetworkInterface>
 #include <QHostAddress>
@@ -28,6 +26,7 @@ void DeviceStatsModel::setActive(bool active)
 
     if (m_active) {
         m_slowTick = 0; // refresh the slow stats immediately on (re)entry
+        m_haveLastCpuSample = false; // avoid diffing /proc/stat across the closed period
         poll();
         m_timer.start();
     } else {
@@ -66,20 +65,42 @@ void DeviceStatsModel::pollCpuTemp()
 
 void DeviceStatsModel::pollCpuLoad()
 {
-    QFile f("/proc/loadavg");
+    // Instantaneous CPU busy % from /proc/stat's aggregate "cpu" line, as a
+    // delta between this poll and the last one. Previously this read
+    // /proc/loadavg's 1-minute average instead — a trailing, exponentially
+    // smoothed count of runnable+I/O-blocked processes, not CPU-busy time, so
+    // it could sit well above real usage (inflated by brief periodic I/O:
+    // nmcli polling, vcgencmd, log flushes) and lag real load by design.
+    QFile f("/proc/stat");
     if (!f.open(QIODevice::ReadOnly | QIODevice::Text)) {
         m_cpuLoadPct = -1.0;
         return;
     }
-    const QStringList parts = QString::fromUtf8(f.readAll()).split(' ', Qt::SkipEmptyParts);
-    if (parts.isEmpty()) {
+    const QStringList parts = QString::fromUtf8(f.readLine()).split(' ', Qt::SkipEmptyParts);
+    // "cpu  <user> <nice> <system> <idle> <iowait> <irq> <softirq> ..." — already
+    // aggregated across all cores by the kernel, so no core-count normalization
+    // is needed (unlike the old loadavg-based computation).
+    if (parts.size() < 6 || parts.first() != QLatin1String("cpu")) {
         m_cpuLoadPct = -1.0;
         return;
     }
-    bool ok = false;
-    const double load1min = parts.first().toDouble(&ok);
-    const int cores = qMax(1, QThread::idealThreadCount());
-    m_cpuLoadPct = ok ? (load1min / cores) * 100.0 : -1.0;
+
+    quint64 total = 0;
+    for (int i = 1; i < parts.size(); ++i)
+        total += parts.at(i).toULongLong();
+    const quint64 idle = parts.at(4).toULongLong() + parts.at(5).toULongLong(); // idle + iowait
+
+    if (m_haveLastCpuSample) {
+        const quint64 totalDelta = total - m_lastCpuTotal;
+        const quint64 idleDelta  = idle  - m_lastCpuIdle;
+        m_cpuLoadPct = totalDelta > 0 ? (1.0 - double(idleDelta) / double(totalDelta)) * 100.0 : 0.0;
+    } else {
+        m_cpuLoadPct = -1.0; // no prior sample yet — first tick after (re)activation
+    }
+
+    m_lastCpuTotal = total;
+    m_lastCpuIdle  = idle;
+    m_haveLastCpuSample = true;
 }
 
 void DeviceStatsModel::pollMemory()
@@ -91,15 +112,32 @@ void DeviceStatsModel::pollMemory()
         return;
     }
 
-    qint64 totalKb = -1, availKb = -1;
-    QTextStream in(&f);
-    while (!in.atEnd()) {
-        const QString line = in.readLine();
+    // /proc pseudo-files report size 0 via fstat(); QTextStream's atEnd() can
+    // rely on that reported size and return true before any bytes are read,
+    // silently yielding zero lines. QFile::readAll() bypasses that and reads
+    // the real content directly — the same pattern already used successfully
+    // by pollCpuTemp()/pollUptime() elsewhere in this file.
+    qint64 totalKb = -1, availKb = -1, freeKb = -1, buffersKb = -1, cachedKb = -1;
+    const QList<QByteArray> lines = f.readAll().split('\n');
+    for (const QByteArray &lineBytes : lines) {
+        const QString line = QString::fromUtf8(lineBytes);
         if (line.startsWith("MemTotal:"))
             totalKb = line.split(' ', Qt::SkipEmptyParts).value(1).toLongLong();
         else if (line.startsWith("MemAvailable:"))
             availKb = line.split(' ', Qt::SkipEmptyParts).value(1).toLongLong();
+        else if (line.startsWith("MemFree:"))
+            freeKb = line.split(' ', Qt::SkipEmptyParts).value(1).toLongLong();
+        else if (line.startsWith("Buffers:"))
+            buffersKb = line.split(' ', Qt::SkipEmptyParts).value(1).toLongLong();
+        else if (line.startsWith("Cached:"))
+            cachedKb = line.split(' ', Qt::SkipEmptyParts).value(1).toLongLong();
     }
+
+    // MemAvailable (kernel >= 3.14) is the accurate reclaimable-aware figure;
+    // without it the row was stuck permanently on the "—" placeholder with no
+    // way to recover. Fall back to the pre-3.14 approximation instead.
+    if (availKb < 0 && freeKb >= 0 && buffersKb >= 0 && cachedKb >= 0)
+        availKb = freeKb + buffersKb + cachedKb;
 
     if (totalKb < 0 || availKb < 0) {
         m_memTotalMb = -1;
