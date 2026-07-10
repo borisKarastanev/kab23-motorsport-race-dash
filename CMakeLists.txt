@@ -77,3 +77,13 @@ if(Qt6Bluetooth_FOUND)
 else()
     message(STATUS "Qt6 Bluetooth not found — only MockRaceBoxProvider available")
 endif()
+
+# Off by default so install.sh's plain `cmake ..` (no extra flags) never builds
+# tests on the Pi. CI opts in explicitly with -DBUILD_TESTING=ON. Deliberately
+# NOT include(CTest) — that module forces BUILD_TESTING to ON by default,
+# which would invert this.
+option(BUILD_TESTING "Build the test suite" OFF)
+if(BUILD_TESTING)
+    enable_testing()
+    add_subdirectory(tests)
+endif()
