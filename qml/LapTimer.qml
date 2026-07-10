@@ -123,6 +123,7 @@ Rectangle {
     // crossing of this run). After a Save Session reset the state is Standby, so
     // the prompt stays hidden and the panel shows plain "--:--" instead.
     Rectangle {
+        id: waitingOverlay
         visible: raceBoxModel.lapTimerState === RaceBox.Armed
         anchors.fill: parent
         color: parent.color
@@ -139,7 +140,11 @@ Rectangle {
             horizontalAlignment: Text.AlignHCenter
 
             SequentialAnimation on opacity {
-                running: true
+                // Was hardcoded `running: true` — ran this infinite animation
+                // (forcing a scene-graph sync + repaint every frame) from app
+                // startup regardless of whether the overlay was ever shown,
+                // since an item's own `visible` doesn't track an ancestor's.
+                running: waitingOverlay.visible
                 loops: Animation.Infinite
                 NumberAnimation { to: 0.3; duration: 1000; easing.type: Easing.InOutSine }
                 NumberAnimation { to: 1.0; duration: 1000; easing.type: Easing.InOutSine }
