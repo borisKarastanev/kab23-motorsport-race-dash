@@ -1,4 +1,5 @@
 #include "logbuffermodel.h"
+#include "apppaths.h"
 
 #include <QCoreApplication>
 #include <QDateTime>
@@ -18,12 +19,12 @@ thread_local bool g_inHandler = false;
 
 QString LogBufferModel::logPath()
 {
-    return QCoreApplication::applicationDirPath() + "/dash.log";
+    return AppPaths::dataFile("dash.log");
 }
 
 QString LogBufferModel::rotatedLogPath()
 {
-    return QCoreApplication::applicationDirPath() + "/dash.log.1";
+    return AppPaths::dataFile("dash.log.1");
 }
 
 LogBufferModel::LogBufferModel(QObject *parent) : QObject(parent)

@@ -3,6 +3,7 @@
 #include "raceboxmodel.h"
 #include "trackmodel.h"
 #include "logging.h"
+#include "apppaths.h"
 
 #include <QCoreApplication>
 #include <QFile>
@@ -19,7 +20,7 @@ constexpr int kSaveMaxSpeedKmh = 5;
 
 QString SessionModel::sessionsPath()
 {
-    return QCoreApplication::applicationDirPath() + "/sessions.json";
+    return AppPaths::dataFile("sessions.json");
 }
 
 SessionModel::SessionModel(CanDataModel *canModel, RaceBoxModel *raceBoxModel,
