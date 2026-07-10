@@ -43,13 +43,20 @@ step "Priming fontconfig cache"
 fc-cache -f
 
 step "Building application"
+# Wipe the build directory rather than reusing it: CMake's Unix Makefiles
+# generator regenerates shared per-target bookkeeping on any CMakeLists.txt
+# edit, so an incremental build here has previously linked in stale
+# generated resource/object files from a prior build-system config (e.g.
+# the qt_add_qml_module revert) alongside the current source, producing a
+# binary with mismatched/duplicate QML resource paths that crashes at
+# startup. ccache (below) makes a full rebuild cheap, so there's no
+# incremental-build fragility left to trade for the risk.
+# Removing (not just unlinking the binary) is still ETXTBSY-safe if this
+# runs as an in-app update while the dashboard is running: the running
+# process keeps its inode open until it exits, same as a plain rm -f would.
+rm -rf "$REPO_DIR/build"
 mkdir -p "$REPO_DIR/build"
 chown -R "$DASHBOARD_USER:$DASHBOARD_USER" "$REPO_DIR/build"
-# Unlink the previous binary before relinking — if this script is run as an
-# in-app update while the dashboard is still running, ld writing the output
-# in place would hit ETXTBSY. Unlinking is safe: the running process keeps
-# its inode open until it exits.
-rm -f "$REPO_DIR/build/bmw-e46-dash"
 # Run cmake and make as the repo owner — Qt cmake macros write into the source
 # tree via configure_file, which fails when running as root.
 sudo -u "$DASHBOARD_USER" bash -c "cd '$REPO_DIR/build' && cmake .. -DCMAKE_BUILD_TYPE=Release && make -j\$(nproc)"
