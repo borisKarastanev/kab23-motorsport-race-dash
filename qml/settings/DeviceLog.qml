@@ -69,7 +69,10 @@ Item {
 
             delegate: Item {
                 width: ListView.view.width
-                height: msgText.height + 16
+                // Bottom padding matches msgText's own topMargin, so the row
+                // is symmetric top/bottom regardless of how many lines the
+                // message wraps to.
+                height: msgText.anchors.topMargin + msgText.height + 8
 
                 Rectangle {
                     anchors.fill: parent
@@ -113,16 +116,6 @@ Item {
                         font.family: "monospace"
                         wrapMode: Text.Wrap
                     }
-                }
-
-                Rectangle {
-                    anchors.bottom: parent.bottom
-                    anchors.left: parent.left
-                    anchors.right: parent.right
-                    anchors.leftMargin: 16
-                    anchors.rightMargin: 16
-                    height: 1
-                    color: "#1a1a1a"
                 }
             }
 
