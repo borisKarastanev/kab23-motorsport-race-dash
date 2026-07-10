@@ -29,6 +29,11 @@
 int main(int argc, char *argv[])
 {
     QGuiApplication app(argc, argv);
+    // Fixes the QStandardPaths AppDataLocation to ~/.local/share/bmw-e46-dash,
+    // where all persistent user data lives (see src/apppaths.h). Must be set
+    // before any model that persists data is constructed (LogBufferModel below
+    // opens its log file immediately).
+    QCoreApplication::setApplicationName("bmw-e46-dash");
     qRegisterMetaType<QCanBusFrame>("QCanBusFrame");
     qRegisterMetaType<RaceBoxData>("RaceBoxData");
 

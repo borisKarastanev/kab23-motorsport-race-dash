@@ -1,6 +1,7 @@
 #include "trackmodel.h"
 #include "raceboxmodel.h"
 #include "logging.h"
+#include "apppaths.h"
 
 #include <QCoreApplication>
 #include <QFile>
@@ -20,12 +21,12 @@ const char *kMockTrackId = "mock-track";
 
 QString TrackModel::userStatePath()
 {
-    return QCoreApplication::applicationDirPath() + "/tracks-user.json";
+    return AppPaths::dataFile("tracks-user.json");
 }
 
 QString TrackModel::dbOverridePath()
 {
-    return QCoreApplication::applicationDirPath() + "/track-db.json";
+    return AppPaths::dataFile("track-db.json");
 }
 
 TrackModel::TrackModel(RaceBoxModel *raceBoxModel, bool mockMode, QObject *parent)

@@ -42,6 +42,34 @@ step "Priming fontconfig cache"
 # priming here instead of paying for it live.
 fc-cache -f
 
+step "Migrating legacy user data out of build/"
+# The app now stores all persistent user data in a stable per-user directory
+# (QStandardPaths AppDataLocation -> ~/.local/share/bmw-e46-dash, see
+# src/apppaths.h) that no build step ever touches. Earlier versions stored it
+# next to the binary — QCoreApplication::applicationDirPath() resolves to
+# build/ — so a device updating from such a version still has irreplaceable race
+# data sitting inside build/ that the wipe below would destroy. Move it into the
+# stable directory ONCE, before the wipe.
+#
+# LEGACY_DATA_FILES is a fixed historical list on purpose: only pre-migration
+# versions ever wrote to build/, so this set can never grow. Any file added in
+# future is written straight to the stable directory and needs no migration.
+# This MUST stay in sync with the AppDataLocation path baked into the binary via
+# setApplicationName("bmw-e46-dash") in main.cpp.
+DATA_DIR="$USER_HOME/.local/share/bmw-e46-dash"
+LEGACY_DATA_FILES=(sessions.json tracks-user.json dashboard.conf track-db.json dash.log dash.log.1)
+if [ -d "$REPO_DIR/build" ]; then
+    sudo -u "$DASHBOARD_USER" mkdir -p "$DATA_DIR"
+    for f in "${LEGACY_DATA_FILES[@]}"; do
+        # Only migrate when the stable copy doesn't already exist, so a stale
+        # build/ leftover can never clobber newer data already in the stable dir.
+        if [ -f "$REPO_DIR/build/$f" ] && [ ! -e "$DATA_DIR/$f" ]; then
+            sudo -u "$DASHBOARD_USER" cp -p "$REPO_DIR/build/$f" "$DATA_DIR/$f"
+            echo "    (migrated $f -> $DATA_DIR)"
+        fi
+    done
+fi
+
 step "Building application"
 # Wipe the build directory rather than reusing it: CMake's Unix Makefiles
 # generator regenerates shared per-target bookkeeping on any CMakeLists.txt
@@ -50,7 +78,8 @@ step "Building application"
 # the qt_add_qml_module revert) alongside the current source, producing a
 # binary with mismatched/duplicate QML resource paths that crashes at
 # startup. ccache (below) makes a full rebuild cheap, so there's no
-# incremental-build fragility left to trade for the risk.
+# incremental-build fragility left to trade for the risk. User data no longer
+# lives here (see the migration step above), so the wipe is non-destructive.
 # Removing (not just unlinking the binary) is still ETXTBSY-safe if this
 # runs as an in-app update while the dashboard is running: the running
 # process keeps its inode open until it exits, same as a plain rm -f would.

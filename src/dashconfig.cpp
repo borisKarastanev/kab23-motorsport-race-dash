@@ -1,4 +1,5 @@
 #include "dashconfig.h"
+#include "apppaths.h"
 
 #include <QCoreApplication>
 #include <QFile>
@@ -16,7 +17,7 @@ static QString validatedPosition(const QString &pos, const QString &key)
 
 static QString configPath()
 {
-    return QCoreApplication::applicationDirPath() + "/dashboard.conf";
+    return AppPaths::dataFile("dashboard.conf");
 }
 
 static void writeDefaultConfig(const QString &path)
