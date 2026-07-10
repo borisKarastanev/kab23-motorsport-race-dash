@@ -25,6 +25,7 @@ Item {
     Component { id: compDeviceVersion;  AppVersionDetail {} }
     Component { id: compDeviceStats;    DeviceStats {} }
     Component { id: compDeviceLog;      DeviceLog {} }
+    Component { id: compDisplay;        DisplaySettings {} }
 
     function registryFor(key) {
         switch (key) {
@@ -41,6 +42,7 @@ Item {
             case "device-version":  return compDeviceVersion
             case "device-stats":    return compDeviceStats
             case "device-log":      return compDeviceLog
+            case "display":         return compDisplay
             default:                return compUi
         }
     }

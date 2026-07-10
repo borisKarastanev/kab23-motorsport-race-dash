@@ -19,6 +19,7 @@
 #include "src/logging.h"
 #include "src/logbuffermodel.h"
 #include "src/devicestatsmodel.h"
+#include "src/displaymodel.h"
 #include "src/updatemodel.h"
 #include "src/networkmodel.h"
 
@@ -71,6 +72,7 @@ int main(int argc, char *argv[])
     SessionModel     sessionModel(&dataModel, &raceBoxModel, &trackModel);
     UpdateModel      updateModel(useMock);
     DeviceStatsModel deviceStatsModel;
+    DisplayModel     displayModel;
     NetworkModel     networkModel(useMock);
 
     // Finish lines are owned by TrackModel and applied below via
@@ -136,6 +138,7 @@ int main(int argc, char *argv[])
     engine.rootContext()->setContextProperty("trackModel",      &trackModel);
     engine.rootContext()->setContextProperty("updateModel",     &updateModel);
     engine.rootContext()->setContextProperty("deviceStatsModel", &deviceStatsModel);
+    engine.rootContext()->setContextProperty("displayModel",    &displayModel);
     engine.rootContext()->setContextProperty("networkModel",    &networkModel);
     engine.rootContext()->setContextProperty("logBuffer",       &logBuffer);
     engine.rootContext()->setContextProperty("kioskMode",       kioskMode);

@@ -9,6 +9,7 @@ Item {
         ListElement { itemTitle: "APP VERSION";  itemKey: "device-version" }
         ListElement { itemTitle: "DEVICE STATS";  itemKey: "device-stats" }
         ListElement { itemTitle: "DEVICE LOG";    itemKey: "device-log" }
+        ListElement { itemTitle: "DISPLAY";       itemKey: "display" }
         ListElement { itemTitle: "NETWORK CONNECTION"; itemKey: "network" }
     }
 

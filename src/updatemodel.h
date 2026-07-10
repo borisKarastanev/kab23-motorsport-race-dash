@@ -54,6 +54,11 @@ public:
     QString installStage()   const { return m_installStage; }
     double  installProgress() const { return m_installProgress; }
 
+    // Counts install.sh's own step "..." calls, given its source text. Pure
+    // (no file I/O) so it's directly unit-testable; countInstallStages() below
+    // is the file-reading wrapper actually used at runtime.
+    static int countStageMarkers(const QString &scriptText);
+
     Q_INVOKABLE void checkConnection();
     Q_INVOKABLE void checkForUpdates();
     Q_INVOKABLE void startInstall();
@@ -78,6 +83,7 @@ private:
     void runCheckout();
     void runValidatePassword();
     void runInstallScript();
+    int  countInstallStages() const;
     void runRollbackCheckout(const QString &reason);
     void beginInstalling();
     void startProcessStep(const QString &program, const QStringList &args, int timeoutMs,
@@ -104,5 +110,13 @@ private:
     QString m_procOutputTail;
     int m_installStagesSeen = 0;
 
-    static constexpr int kInstallTotalStages = 8;
+    // Recomputed by countInstallStages() right before each real install run
+    // (after runCheckout() has already updated install.sh on disk to the
+    // version being installed), rather than a second hardcoded count that
+    // drifts every time a step is added to or removed from install.sh.
+    // kInstallTotalStagesFallback is only used if that count ever comes back
+    // as 0 (unreadable file, unexpected format) so installProgress can't
+    // divide by zero.
+    int m_installTotalStages = kInstallTotalStagesFallback;
+    static constexpr int kInstallTotalStagesFallback = 8;
 };

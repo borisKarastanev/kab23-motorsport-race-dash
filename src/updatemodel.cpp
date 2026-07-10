@@ -3,6 +3,7 @@
 
 #include <QCoreApplication>
 #include <QDir>
+#include <QFile>
 #include <QNetworkAccessManager>
 #include <QNetworkReply>
 #include <QNetworkRequest>
@@ -278,8 +279,39 @@ void UpdateModel::beginInstalling()
     setState(Installing);
 }
 
+int UpdateModel::countStageMarkers(const QString &scriptText)
+{
+    static const QRegularExpression stepCall(R"(^step ".+"$)", QRegularExpression::MultilineOption);
+    QRegularExpressionMatchIterator it = stepCall.globalMatch(scriptText);
+    int count = 0;
+    while (it.hasNext()) {
+        it.next();
+        ++count;
+    }
+    return count;
+}
+
+int UpdateModel::countInstallStages() const
+{
+    // Counts install.sh's own step "..." calls rather than hardcoding a
+    // number that has to be kept in sync by hand — it previously drifted
+    // badly (a stale constant of 8 against install.sh's real, growing step
+    // count), which made the progress bar hit 100% width well before the
+    // script actually finished while the stage-name label kept updating
+    // underneath it. Called after runCheckout(), so this reads the version
+    // of install.sh actually about to run, not the currently-installed one.
+    QFile f(repoRoot() + "/install.sh");
+    if (!f.open(QIODevice::ReadOnly | QIODevice::Text))
+        return kInstallTotalStagesFallback;
+
+    const int count = countStageMarkers(QString::fromUtf8(f.readAll()));
+    return count > 0 ? count : kInstallTotalStagesFallback;
+}
+
 void UpdateModel::runInstallScript()
 {
+    m_installTotalStages = countInstallStages();
+
     // No timeout: install.sh runs apt + a full build and can take minutes.
     // Progress is reported by parsing the "=== stage ===" markers it prints.
     startProcessStep("sudo", { "-S", "-p", "", "bash", repoRoot() + "/install.sh" }, 0,
@@ -299,7 +331,7 @@ void UpdateModel::runInstallScript()
             while (it.hasNext()) {
                 m_installStagesSeen++;
                 m_installStage = it.next().captured(1);
-                m_installProgress = qMin(1.0, double(m_installStagesSeen) / kInstallTotalStages);
+                m_installProgress = qMin(1.0, double(m_installStagesSeen) / m_installTotalStages);
                 emit installProgressChanged();
             }
         });

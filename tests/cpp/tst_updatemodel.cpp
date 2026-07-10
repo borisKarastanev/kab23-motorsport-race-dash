@@ -1,5 +1,6 @@
 #include <QTest>
 #include <QSignalSpy>
+#include <QFile>
 
 #include "src/updatemodel.h"
 
@@ -8,6 +9,7 @@ class TestUpdateModel : public QObject {
 
 private slots:
     void init();
+    void countStageMarkersCountsStepCalls();
     void checkConnectionMockReachesReadyToCheck();
     void checkForUpdatesMockFindsUpdateAvailable();
     void checkForUpdatesMockUpToDate();
@@ -18,6 +20,38 @@ private slots:
 void TestUpdateModel::init()
 {
     qunsetenv("DASH_MOCK_UPDATE");
+}
+
+void TestUpdateModel::countStageMarkersCountsStepCalls()
+{
+    QCOMPARE(UpdateModel::countStageMarkers(""), 0);
+
+    QCOMPARE(UpdateModel::countStageMarkers(R"(step "Installing dependencies")"), 1);
+
+    // Realistic install.sh shape: comments, blank lines, actual shell logic
+    // between step calls, and a line that MENTIONS "step" inside a comment
+    // (must not be miscounted — the marker requires the line to literally
+    // start with `step "`).
+    const QString script = R"(#!/bin/bash
+set -e
+
+step "Installing dependencies"
+sudo apt install -y qt6-base-dev
+
+# This comment talks about a step "not a real call" and must be ignored
+step "Priming fontconfig cache"
+fc-cache -f
+
+step "Building application"
+)";
+    QCOMPARE(UpdateModel::countStageMarkers(script), 3);
+
+    // Sanity-check against the real install.sh: catches the marker regex
+    // silently matching zero real lines (e.g. if install.sh's step() call
+    // style ever changes), which synthetic-only input above could miss.
+    QFile realScript(DASH_INSTALL_SH);
+    QVERIFY2(realScript.open(QIODevice::ReadOnly | QIODevice::Text), "could not open real install.sh");
+    QVERIFY(UpdateModel::countStageMarkers(QString::fromUtf8(realScript.readAll())) > 0);
 }
 
 void TestUpdateModel::checkConnectionMockReachesReadyToCheck()
