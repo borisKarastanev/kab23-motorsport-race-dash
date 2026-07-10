@@ -45,6 +45,7 @@ add_executable(bmw-e46-dash
     src/trackmodel.cpp
     src/logbuffermodel.cpp
     src/devicestatsmodel.cpp
+    src/displaymodel.cpp
     src/updatemodel.cpp
     src/networkmodel.cpp
     src/sdnotify.cpp

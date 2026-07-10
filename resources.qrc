@@ -17,6 +17,7 @@
         <file>qml/settings/AppVersionDetail.qml</file>
         <file>qml/settings/DeviceStats.qml</file>
         <file>qml/settings/DeviceLog.qml</file>
+        <file>qml/settings/DisplaySettings.qml</file>
         <file>qml/settings/NetworkMenu.qml</file>
         <file>qml/settings/WifiIcon.qml</file>
         <file>qml/settings/WifiDetail.qml</file>

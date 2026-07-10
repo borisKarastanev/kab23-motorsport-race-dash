@@ -108,6 +108,27 @@ polkit.addRule(function(action, subject) {
 });
 RULES
 
+step "Granting backlight brightness control"
+# The Display settings page (DisplayModel) writes
+# /sys/class/backlight/*/brightness directly. That node is normally
+# root-owned; on a desktop session a logind/udev rule usually makes it
+# group-writable, but this service has no active logind session (same
+# console-boot gap as the NetworkManager rule above), so nothing grants
+# access by default. The service already runs with SupplementaryGroups=video
+# (see bmw-e46-dash.service) — this rule just makes the node writable by that
+# group, so no service-file change is needed. Idempotent: udev rules are
+# just files, safe to overwrite on every install/update.
+sudo mkdir -p /etc/udev/rules.d
+sudo tee /etc/udev/rules.d/99-race-dash-backlight.rules > /dev/null << 'RULES'
+SUBSYSTEM=="backlight", ACTION=="add", RUN+="/bin/chgrp video /sys/class/backlight/%k/brightness", RUN+="/bin/chmod g+w /sys/class/backlight/%k/brightness"
+RULES
+sudo udevadm control --reload
+# --action=add is required: the rule matches ACTION=="add", but `udevadm
+# trigger` defaults to emitting a "change" event, which would NOT match and so
+# would leave the node non-writable until the next real add (i.e. a reboot).
+# Forcing an add re-runs the rule now, on the already-present device.
+sudo udevadm trigger --action=add --subsystem-match=backlight
+
 step "Enabling Bluetooth adapter"
 rfkill unblock bluetooth || true
 # Drop-in for bluetooth.service: unblock rfkill just before bluetoothd starts.
