@@ -20,6 +20,18 @@ constexpr double kLearnGateHalfWidthM = 20.0;  // learned gate spans 40 m across
                                                // (matches the old finish circle's diameter)
 constexpr double kGatePrefilterM      = 250.0; // skip crossing math when clearly far away
 
+// Heading is measured from a moving anchor rather than from the previous fix: the
+// car must travel this far from the anchor before a new bearing is taken, and the
+// anchor then moves up. Sampling consecutive fixes instead would tie the heading to
+// the device's data rate — at 25 Hz a 0.5 m step implies ~45 km/h, so the heading
+// would silently stop updating below that speed.
+constexpr double kHeadingAnchorM  = 0.5;
+// A heading older than this is treated as unusable: the car has been sitting still
+// (or crawling under kHeadingAnchorM) long enough that its last direction of travel
+// says nothing about how it will next cross the line. Learning a gate from a stale
+// heading yields one skewed — possibly parallel and uncrossable — to the track.
+constexpr qint64 kHeadingMaxAgeMs = 5000;
+
 // Metres per degree of longitude at the given latitude.
 double metersPerDegLon(double latDeg)
 {
@@ -120,6 +132,12 @@ qint64 RaceBoxModel::referenceElapsedAtPosition(double lat, double lon) const
     return s0.elapsedMs + static_cast<qint64>(bestFrac * double(s1.elapsedMs - s0.elapsedMs));
 }
 
+bool RaceBoxModel::canLearnFinishLine() const
+{
+    if (!m_hasFix || !m_haveHeading) return false;
+    return (m_clock.elapsed() - m_headingMs) <= kHeadingMaxAgeMs;
+}
+
 RaceBoxModel::LapTimerState RaceBoxModel::lapTimerState() const
 {
     if (m_lapTimerRunning)              return Running;
@@ -156,10 +174,12 @@ void RaceBoxModel::gateFromHeading(double lat, double lon,
 
 void RaceBoxModel::learnFinishLineHere()
 {
-    if (!m_hasFix) return;
-    if (!m_haveHeading) {
-        // Without a travel direction the gate can't be oriented across the track.
-        qCWarning(lcRaceBox) << "Cannot learn finish line: no heading yet — drive across the line";
+    // Without a fix, or without a travel direction, the gate can't be oriented
+    // across the track. The UI binds to this same predicate, so reaching here
+    // with it false means a caller ignored canLearnFinishLine.
+    if (!canLearnFinishLine()) {
+        qCWarning(lcRaceBox) << "Cannot learn finish line: need a GPS fix and a heading"
+                             << "— drive across the line";
         return;
     }
     double latA, lonA, latB, lonB;
@@ -177,7 +197,8 @@ void RaceBoxModel::onConnectionStateChanged(bool connected)
     m_dirty |= kDirtyConnected;
     if (!connected) {
         m_hasFix = false;
-        m_havePrevFix = false; // stale previous fix must not bridge a reconnect
+        m_havePrevFix = false;       // stale previous fix must not bridge a reconnect
+        m_haveHeadingAnchor = false; // nor anchor a bearing across the gap
         m_dirty |= kDirtyFix;
     }
 }
@@ -192,7 +213,8 @@ void RaceBoxModel::onData(const RaceBoxData &d)
             qCInfo(lcRaceBox) << "GPS fix acquired — SVs:" << d.numSvs;
         } else {
             qCInfo(lcRaceBox) << "GPS fix lost";
-            m_havePrevFix = false; // don't bridge a dropout into a false crossing
+            m_havePrevFix = false;       // don't bridge a dropout into a false crossing
+            m_haveHeadingAnchor = false; // nor measure a bearing across one
         }
     }
 
@@ -220,14 +242,24 @@ void RaceBoxModel::onData(const RaceBoxData &d)
         const double curLat = d.latitude, curLon = d.longitude;
         const qint64 nowMs  = m_clock.elapsed();
 
-        if (m_havePrevFix) {
-            const double stepM = haversineM(m_lastLat, m_lastLon, curLat, curLon);
+        // Refresh the travel heading once the car has moved kHeadingAnchorM from the
+        // anchor, then move the anchor up. Anchoring (rather than differencing
+        // consecutive fixes) keeps this working at any speed, and gives the heading
+        // an age: it only goes stale when the car actually stops moving.
+        if (!m_haveHeadingAnchor) {
+            m_headingAnchorLat = curLat;
+            m_headingAnchorLon = curLon;
+            m_haveHeadingAnchor = true;
+        } else if (haversineM(m_headingAnchorLat, m_headingAnchorLon, curLat, curLon)
+                   >= kHeadingAnchorM) {
+            m_headingRad  = bearingRad(m_headingAnchorLat, m_headingAnchorLon, curLat, curLon);
+            m_headingMs   = nowMs;
+            m_haveHeading = true;
+            m_headingAnchorLat = curLat;
+            m_headingAnchorLon = curLon;
+        }
 
-            // Refresh the travel heading when the car has moved appreciably.
-            if (stepM > 0.5) {
-                m_headingRad  = bearingRad(m_lastLat, m_lastLon, curLat, curLon);
-                m_haveHeading = true;
-            }
+        if (m_havePrevFix) {
             updateLapTiming(m_lastLat, m_lastLon, curLat, curLon,
                             static_cast<double>(kmhInt), m_prevFixMs, nowMs);
         }
@@ -403,6 +435,17 @@ void RaceBoxModel::resetLapCounters()
 void RaceBoxModel::emitNotifications()
 {
     if (m_lapTimerRunning) m_dirty |= kDirtyCurrentLap;
+
+    // Derived, and — unlike every other property here — it decays with time rather
+    // than with incoming frames: the heading goes stale while the car sits still,
+    // which produces no frames and so no dirty bit. Recompute it above the
+    // early-return guard, otherwise a parked car would never see it expire.
+    const bool canLearn = canLearnFinishLine();
+    if (canLearn != m_lastCanLearnFinishLine) {
+        m_lastCanLearnFinishLine = canLearn;
+        emit canLearnFinishLineChanged();
+    }
+
     if (!m_dirty) return;
     const quint16 dirty = m_dirty;
     m_dirty = 0;
