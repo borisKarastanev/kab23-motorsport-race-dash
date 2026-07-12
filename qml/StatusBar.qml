@@ -135,14 +135,18 @@ Rectangle {
             }
         }
 
-        // Finish line button — enabled only when GPS fix is active
+        // Finish line button. A gate is built perpendicular to the car's travel
+        // heading, so it can only be learned once moving — canLearnFinishLine is the
+        // model's own precondition for that, and binding to it keeps the button from
+        // offering a tap that would silently do nothing. "Has a fix but still can't
+        // learn" means the heading is the missing half, so prompt the driver to move.
         Rectangle {
             height: 20
             width: finishLineLabel.width + 16
             color: mouseArea.pressed ? "#1a2a1a" : "transparent"
-            border.color: raceBoxModel.finishLineSet ? "#2a4a2a"
-                        : raceBoxModel.hasFix        ? "#445544"
-                        :                              "#222222"
+            border.color: raceBoxModel.finishLineSet     ? "#2a4a2a"
+                        : raceBoxModel.canLearnFinishLine ? "#445544"
+                        :                                   "#222222"
             border.width: 1
             radius: 2
             Layout.alignment: Qt.AlignVCenter
@@ -152,10 +156,12 @@ Rectangle {
                 anchors.centerIn: parent
                 text: raceBoxModel.finishLineSet
                       ? (mouseArea.pressed ? "⟳ HOLD TO RESET..." : "✓ FINISH LINE SET")
-                      : "+ SET FINISH LINE"
-                color: raceBoxModel.finishLineSet ? "#00cc44"
-                     : raceBoxModel.hasFix        ? "#558855"
-                     :                              "#333333"
+                      : raceBoxModel.canLearnFinishLine ? "+ SET FINISH LINE"
+                      : raceBoxModel.hasFix             ? "DRIVE TO SET LINE"
+                      :                                   "+ SET FINISH LINE"
+                color: raceBoxModel.finishLineSet     ? "#00cc44"
+                     : raceBoxModel.canLearnFinishLine ? "#558855"
+                     :                                   "#333333"
                 font.pixelSize: 10
                 font.letterSpacing: 1
                 font.family: "monospace"
@@ -164,7 +170,9 @@ Rectangle {
             MouseArea {
                 id: mouseArea
                 anchors.fill: parent
-                enabled: raceBoxModel.hasFix
+                // Two actions share this area: tap-to-set (needs the model to be
+                // able to learn) and hold-to-reset (needs a line already set).
+                enabled: raceBoxModel.finishLineSet || raceBoxModel.canLearnFinishLine
                 pressAndHoldInterval: 3000
                 onClicked: {
                     if (!raceBoxModel.finishLineSet)

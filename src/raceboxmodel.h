@@ -39,6 +39,12 @@ public:
     Q_PROPERTY(int     batteryPercent  READ batteryPercent  NOTIFY batteryPercentChanged)
     Q_PROPERTY(bool    batteryCharging READ batteryCharging NOTIFY batteryChargingChanged)
     Q_PROPERTY(bool    finishLineSet   READ finishLineSet   NOTIFY finishLineSetChanged)
+    // Whether learnFinishLineHere() would actually succeed right now. The gate is
+    // built perpendicular to the car's travel heading, so it needs a fix AND a
+    // heading — and a heading only exists once the car has moved. This is the same
+    // predicate learnFinishLineHere() enforces, so a UI bound to it can never offer
+    // a button whose tap silently does nothing.
+    Q_PROPERTY(bool canLearnFinishLine READ canLearnFinishLine NOTIFY canLearnFinishLineChanged)
     Q_PROPERTY(LapTimerState lapTimerState READ lapTimerState NOTIFY lapTimerStateChanged)
 
     explicit RaceBoxModel(QObject *parent = nullptr);
@@ -57,6 +63,11 @@ public:
     int    batteryPercent()  const { return m_batteryPercent; }
     bool   batteryCharging() const { return m_batteryCharging; }
     bool   finishLineSet()   const { return m_finishLineSet; }
+    // Single source of truth for "can a finish line be learned right now" —
+    // enforced by learnFinishLineHere() and bound to by the UI. Requires a fix and a
+    // *fresh* heading: a heading recorded before the car parked is not evidence of
+    // how it will next cross the line.
+    bool   canLearnFinishLine() const;
     // Single source of truth for the lap-timer lifecycle (see LapTimerState).
     LapTimerState lapTimerState() const;
 
@@ -112,6 +123,7 @@ signals:
     void batteryPercentChanged();
     void batteryChargingChanged();
     void finishLineSetChanged();
+    void canLearnFinishLineChanged();
     void lapTimerStateChanged();
     // Emitted when the finish-line gate is learned (perpendicular to travel) or
     // cleared (all zero), so the caller can persist the two endpoints.
@@ -205,10 +217,17 @@ private:
     // session save; cleared only when the gate itself changes. 0 = unlatched.
     int    m_crossDirSign = 0;
 
-    // Recent direction of travel (radians, bearing) — used to orient a learned
-    // gate perpendicular to the track.
+    // Recent direction of travel (radians, bearing) — used to orient a learned gate
+    // perpendicular to the track. Taken from a moving anchor the car has travelled
+    // kHeadingAnchorM away from, not from the previous fix, so it updates at any
+    // speed rather than only above the one implied by the device's data rate.
+    // m_headingMs times the last refresh: a heading that stops being refreshed means
+    // the car has stopped, and goes stale (see canLearnFinishLine()).
     double m_headingRad  = 0.0;
     bool   m_haveHeading = false;
+    qint64 m_headingMs   = 0;
+    double m_headingAnchorLat = 0.0, m_headingAnchorLon = 0.0;
+    bool   m_haveHeadingAnchor = false;
 
     // Motion
     int    m_speedKmh       = 0;
@@ -239,6 +258,10 @@ private:
     // fires lapTimerStateChanged(). Always coincides with some dirty bit, so the
     // notify tick never early-returns through a real transition.
     LapTimerState m_lastLapTimerState = Idle;
+    // Same recompute-on-transition treatment for canLearnFinishLine() — which has no
+    // dirty bit at all, because it can go false purely by the heading ageing out
+    // while the car sits still and sends nothing.
+    bool m_lastCanLearnFinishLine = false;
 
     QTimer m_notifyTimer;
 };
