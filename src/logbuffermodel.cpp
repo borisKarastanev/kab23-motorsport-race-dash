@@ -8,6 +8,7 @@
 #include <QMutexLocker>
 #include <QStringList>
 #include <QTextStream>
+#include <algorithm>
 #include <utility>
 
 LogBufferModel *LogBufferModel::s_instance = nullptr;
@@ -37,13 +38,14 @@ LogBufferModel::LogBufferModel(QObject *parent) : QObject(parent)
     m_logFile.open(QIODevice::Append | QIODevice::Text);
     m_logBytes = m_logFile.size();
 
-    // Coalesce entriesChanged() to ≤10 Hz on the main thread. The message
-    // handler runs on arbitrary threads and only sets a dirty flag; this timer
-    // (owned by / ticking on the main thread) is the sole emitter, so a log
-    // flood can't post an unbounded stream of queued signals.
-    m_notifyTimer.setInterval(100);
-    connect(&m_notifyTimer, &QTimer::timeout, this, &LogBufferModel::flushNotifications);
-    m_notifyTimer.start();
+    refresh(); // seed the snapshot with the persisted entries
+
+    // The writer. All log-file I/O happens here, on the main thread, outside
+    // m_mutex — see the class comment. 10 Hz batches a flood into one write burst
+    // and one flush instead of a flush per message.
+    m_writeTimer.setInterval(100);
+    connect(&m_writeTimer, &QTimer::timeout, this, &LogBufferModel::drainPending);
+    m_writeTimer.start();
 
     s_previousHandler = qInstallMessageHandler(&LogBufferModel::messageHandler);
 }
@@ -52,6 +54,10 @@ LogBufferModel::~LogBufferModel()
 {
     qInstallMessageHandler(s_previousHandler);
     s_instance = nullptr;
+    // Persist the tail of the log, but via flushToDisk() rather than drainPending():
+    // emitting newSinceRefreshChanged() here would dispatch into QML bindings on an
+    // object that is already half-destroyed.
+    flushToDisk();
 }
 
 std::deque<LogBufferModel::Entry> &LogBufferModel::bucketFor(const QString &level)
@@ -77,6 +83,20 @@ void LogBufferModel::pushCapped(std::deque<Entry> &bucket, const Entry &e)
     bucket.push_back(e);
     if (bucket.size() > static_cast<size_t>(kCapacity))
         bucket.pop_front();
+}
+
+QByteArray LogBufferModel::serializeLine(const QString &level, const QString &category,
+                                         const QString &message, const QDateTime &when)
+{
+    QJsonObject obj;
+    obj["t"] = when.toString(Qt::ISODate);
+    obj["l"] = level;
+    obj["c"] = category;
+    obj["m"] = message;
+
+    QByteArray line = QJsonDocument(obj).toJson(QJsonDocument::Compact);
+    line.append('\n');
+    return line;
 }
 
 void LogBufferModel::messageHandler(QtMsgType type, const QMessageLogContext &context, const QString &msg)
@@ -109,64 +129,125 @@ void LogBufferModel::handleMessage(QtMsgType type, const QMessageLogContext &con
     }
 
     const QString category = context.category ? QString::fromUtf8(context.category) : QStringLiteral("default");
-
-    // appendEntry marks a pending notify when the entry lands in the bucket
-    // currently on screen (an "error" line shouldn't invalidate the list while
-    // "info" is selected). The notify timer drains that flag at ≤10 Hz — see
-    // flushNotifications — so a high-rate source can't drive per-message QML
-    // rebuilds. persistEntry still writes every line so nothing is lost.
-    appendEntry(level, category, msg, false);
-    persistEntry(level, category, msg);
-}
-
-void LogBufferModel::appendEntry(const QString &level, const QString &category, const QString &message, bool prev)
-{
-    QMutexLocker locker(&m_mutex);
+    const QDateTime now = QDateTime::currentDateTime();
 
     Entry e;
-    e.time     = QDateTime::currentDateTime().toString("HH:mm:ss");
+    e.time     = now.toString("HH:mm:ss");
     e.category = category;
-    e.message  = message;
-    e.prev     = prev;
+    e.message  = msg;
+    e.prev     = false;
 
-    pushCapped(bucketFor(level), e);
+    // Serializing is the most expensive step per message, so skip it entirely when
+    // the writer is already saturated — appendEntry() would only drop the result.
+    // The entry still goes into the in-memory bucket. Done before the lock: pure
+    // computation, no I/O, no contention.
+    QByteArray line;
+    if (!m_writeQueueFull.load(std::memory_order_relaxed))
+        line = serializeLine(level, category, msg, now);
 
-    // Mark a refresh pending only when this lands in the on-screen bucket; the
-    // notify timer coalesces these into ≤10 Hz emits (see flushNotifications).
-    if (level == m_filterLevel)
-        m_pendingNotify = true;
+    appendEntry(level, e, std::move(line));
 }
 
-void LogBufferModel::flushNotifications()
+void LogBufferModel::appendEntry(const QString &level, const Entry &e, QByteArray &&line)
 {
-    bool notify;
     {
         QMutexLocker locker(&m_mutex);
-        notify = m_pendingNotify;
-        m_pendingNotify = false;
+
+        pushCapped(bucketFor(level), e);
+
+        // An empty line means handleMessage() skipped serialization because the queue
+        // looked full; re-check the real depth here, under the lock.
+        if (line.isEmpty() || m_pendingWrites.size() >= kMaxPendingWrites) {
+            ++m_droppedWrites;
+            m_writeQueueFull.store(true, std::memory_order_relaxed);
+        } else {
+            m_pendingWrites.append(std::move(line));
+        }
+
+        // Only counts toward the refresh badge if it lands in the on-screen bucket —
+        // an "error" line shouldn't nag while "info" is selected.
+        if (level != m_filterLevel)
+            return;
     }
-    if (notify)
-        emit entriesChanged();
+    m_newSinceRefresh.fetch_add(1, std::memory_order_relaxed);
 }
 
-void LogBufferModel::persistEntry(const QString &level, const QString &category, const QString &message)
+void LogBufferModel::writeTracked(const QByteArray &line)
 {
-    QMutexLocker locker(&m_mutex);
+    const qint64 written = m_logFile.write(line);
+    if (written > 0) // write() returns -1 on error; adding that would drive m_logBytes
+        m_logBytes += written; // negative and stop rotateIfNeeded() from ever firing
+}
 
+void LogBufferModel::flushToDisk()
+{
+    // Check BEFORE consuming the queue. If the file isn't open (read-only rootfs,
+    // full disk, or a failed re-open inside rotateIfNeeded), swapping the queue out
+    // here would silently destroy every line we couldn't write.
     if (!m_logFile.isOpen())
         return;
 
-    QJsonObject obj;
-    obj["t"] = QDateTime::currentDateTime().toString(Qt::ISODate);
-    obj["l"] = level;
-    obj["c"] = category;
-    obj["m"] = message;
+    QList<QByteArray> writes;
+    qint64 dropped = 0;
+    {
+        QMutexLocker locker(&m_mutex);
+        if (m_pendingWrites.isEmpty() && m_droppedWrites == 0)
+            return;
+        writes.swap(m_pendingWrites);
+        dropped = std::exchange(m_droppedWrites, qint64(0));
+        m_writeQueueFull.store(false, std::memory_order_relaxed);
+    }
 
-    m_logBytes += m_logFile.write(QJsonDocument(obj).toJson(QJsonDocument::Compact));
-    m_logBytes += m_logFile.write("\n");
-    m_logFile.flush(); // flush per message so an abrupt power cut keeps the log
+    // File I/O, outside the lock. One write burst and a single flush per tick rather
+    // than a flush per message: on a power cut we lose at most ~100 ms of log, which
+    // is a far better trade than holding m_mutex across SD-card I/O and freezing the
+    // UI thread that is trying to log (and to draw this very page).
+    for (const QByteArray &line : writes)
+        writeTracked(line);
 
+    if (dropped > 0) {
+        const QDateTime now = QDateTime::currentDateTime();
+        const QString note =
+            QStringLiteral("%1 message(s) dropped — log flood outran the writer").arg(dropped);
+
+        // Into the in-memory buffer as well as the file: someone reading Device Log
+        // *on the device* — the whole point of this page — must see that lines were
+        // suppressed, not just a plausible-looking list with holes in it.
+        //
+        // Pushed directly rather than through appendEntry(), which would count this
+        // note itself as a dropped write (it carries no queued line — we write it
+        // below by hand) and so regenerate a fresh note on every tick, forever.
+        Entry e;
+        e.time     = now.toString("HH:mm:ss");
+        e.category = QStringLiteral("dash.log");
+        e.message  = note;
+        e.prev     = false;
+
+        bool visible = false;
+        {
+            QMutexLocker locker(&m_mutex);
+            pushCapped(m_warn, e);
+            visible = (m_filterLevel == QLatin1String("warn"));
+        }
+        if (visible)
+            m_newSinceRefresh.fetch_add(1, std::memory_order_relaxed);
+
+        writeTracked(serializeLine(QStringLiteral("warn"), e.category, note, now));
+    }
+
+    m_logFile.flush();
     rotateIfNeeded();
+}
+
+void LogBufferModel::drainPending()
+{
+    flushToDisk();
+
+    const int newCount = m_newSinceRefresh.load(std::memory_order_relaxed);
+    if (newCount != m_lastNotifiedNew) {
+        m_lastNotifiedNew = newCount;
+        emit newSinceRefreshChanged();
+    }
 }
 
 void LogBufferModel::rotateIfNeeded()
@@ -187,7 +268,7 @@ void LogBufferModel::loadPersisted()
 {
     // Collect raw lines (cheap I/O) oldest-file-first, then JSON-parse only from
     // the newest backwards, stopping once every bucket is full — so a large log
-    // isn't fully parsed on the startup path just to keep the last 20 per level.
+    // isn't fully parsed on the startup path just to keep the last kCapacity per level.
     QStringList lines;
     for (const QString &path : { rotatedLogPath(), logPath() }) {
         QFile f(path);
@@ -254,17 +335,37 @@ void LogBufferModel::setFilterLevel(const QString &level)
         m_filterLevel = level;
     }
     emit filterLevelChanged();
-    emit entriesChanged();
+    refresh(); // switching bucket is an explicit user action — show it immediately
 }
 
-QVariantList LogBufferModel::filteredEntries() const
+void LogBufferModel::setLimit(int limit)
 {
-    QMutexLocker locker(&m_mutex);
+    // QML can write any int to this property. A negative would make refresh() form
+    // `bucket.end() - n` past the end and walk off the deque (SIGSEGV); anything above
+    // kCapacity is unserviceable because the buckets hold no more.
+    const int clamped = std::clamp(limit, 0, kCapacity);
+    if (m_limit == clamped)
+        return;
+    m_limit = clamped;
+    emit limitChanged();
+    refresh();
+}
 
-    const std::deque<Entry> &bucket = bucketFor(m_filterLevel);
+void LogBufferModel::refresh()
+{
+    QVariantList snapshot;
+    {
+        QMutexLocker locker(&m_mutex);
+        const std::deque<Entry> &bucket = bucketFor(m_filterLevel);
+        const int n = std::min<int>(m_limit, static_cast<int>(bucket.size()));
+        snapshot.reserve(n);
+        for (auto it = bucket.end() - n; it != bucket.end(); ++it)
+            snapshot.append(toVariant(*it));
+    }
 
-    QVariantList result;
-    for (const Entry &e : bucket)
-        result.append(toVariant(e));
-    return result;
+    m_newSinceRefresh.store(0, std::memory_order_relaxed);
+    m_snapshot = std::move(snapshot);
+    m_lastNotifiedNew = 0;
+    emit entriesChanged();
+    emit newSinceRefreshChanged();
 }

@@ -73,6 +73,19 @@ target_link_libraries(tst_displaymodel PRIVATE Qt6::Test)
 add_test(NAME tst_displaymodel COMMAND tst_displaymodel)
 set_tests_properties(tst_displaymodel PROPERTIES ENVIRONMENT "${DASH_TEST_ENV}")
 
+# ── logbuffermodel: Device Log buffering, snapshot, and flood safety ──
+# Uses QStandardPaths::setTestModeEnabled() to sandbox dash.log away from the
+# real user data dir. handlerNeverBlocksUnderConcurrentFlood() is the regression
+# guard for the UI freeze: it fails if file I/O is put back inside the logging
+# critical section.
+add_executable(tst_logbuffermodel cpp/tst_logbuffermodel.cpp
+    ${APP_SRC_DIR}/src/logbuffermodel.cpp
+)
+target_include_directories(tst_logbuffermodel PRIVATE ${APP_SRC_DIR})
+target_link_libraries(tst_logbuffermodel PRIVATE Qt6::Test)
+add_test(NAME tst_logbuffermodel COMMAND tst_logbuffermodel)
+set_tests_properties(tst_logbuffermodel PROPERTIES ENVIRONMENT "${DASH_TEST_ENV}")
+
 # ── QML (Qt Quick Test) ────────────────────────────────────────────────
 # Test .qml files load the real qml/*.qml sources directly off disk via
 # relative directory imports (not through the app's compiled qrc resources),
