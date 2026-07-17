@@ -7,7 +7,7 @@ Item {
 
     ListModel {
         id: menuModel
-        ListElement { itemTitle: "CONFIGURE UI";       itemKey: "ui" }
+        ListElement { itemTitle: "DASHBOARD LAYOUT";   itemKey: "layout" }
         ListElement { itemTitle: "INTEGRATIONS";       itemKey: "integrations" }
         ListElement { itemTitle: "SESSIONS";           itemKey: "sessions" }
         ListElement { itemTitle: "TRACKS";             itemKey: "tracks" }

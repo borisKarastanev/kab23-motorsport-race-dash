@@ -86,6 +86,17 @@ target_link_libraries(tst_logbuffermodel PRIVATE Qt6::Test)
 add_test(NAME tst_logbuffermodel COMMAND tst_logbuffermodel)
 set_tests_properties(tst_logbuffermodel PROPERTIES ENVIRONMENT "${DASH_TEST_ENV}")
 
+# ── dashconfig: RPM limiter rescale, position grid, persistence ───────
+# Uses QStandardPaths::setTestModeEnabled() to sandbox AppPaths-backed
+# persistence away from the real user's dashboard.conf.
+add_executable(tst_dashconfig cpp/tst_dashconfig.cpp
+    ${APP_SRC_DIR}/src/dashconfig.cpp
+)
+target_include_directories(tst_dashconfig PRIVATE ${APP_SRC_DIR})
+target_link_libraries(tst_dashconfig PRIVATE Qt6::Test)
+add_test(NAME tst_dashconfig COMMAND tst_dashconfig)
+set_tests_properties(tst_dashconfig PROPERTIES ENVIRONMENT "${DASH_TEST_ENV}")
+
 # ── QML (Qt Quick Test) ────────────────────────────────────────────────
 # Test .qml files load the real qml/*.qml sources directly off disk via
 # relative directory imports (not through the app's compiled qrc resources),
