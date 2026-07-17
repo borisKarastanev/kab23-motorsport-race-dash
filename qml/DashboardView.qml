@@ -1,3 +1,4 @@
+pragma ComponentBehavior: Bound
 import QtQuick 2.15
 import QtQuick.Layouts 1.15
 
@@ -35,12 +36,60 @@ Item {
         }
     }
 
-    function zoneHasContent(zone) {
-        if (zone === "center" && dashConfig.gearVisible) return true
-        return (dashConfig.rpmVisible     && dashConfig.rpmPosition     === zone) ||
-               (dashConfig.speedVisible   && dashConfig.speedPosition   === zone) ||
-               (dashConfig.coolantVisible && dashConfig.coolantPosition === zone) ||
-               (dashConfig.oilTempVisible && dashConfig.oilTempPosition === zone)
+    // Maps a 9-cell position token (e.g. "center-left") to its row/column
+    // index (0/1/2). DashConfig guarantees at most one visible entity per
+    // token (positions are assigned via swap, never left colliding).
+    function rowForPosition(pos) {
+        if (pos.indexOf("top") === 0)    return 0
+        if (pos.indexOf("bottom") === 0) return 2
+        return 1
+    }
+    function colForPosition(pos) {
+        if (pos.indexOf("left") !== -1)  return 0
+        if (pos.indexOf("right") !== -1) return 2
+        return 1
+    }
+
+    // The three column lanes (index 0=left, 1=center, 2=right), each an array
+    // of visible entity keys ordered top-to-bottom by row. Each lane below is
+    // a plain ColumnLayout over its array — with 0-3 entities per lane, that
+    // makes ColumnLayout's own fillHeight distribution do exactly what we
+    // want for free: one entity gets the full lane height, two split it
+    // evenly, three split it three ways. No manual height fractions needed,
+    // and a lane with nothing in it is just an empty array.
+    //
+    // Computed once per layout change into this single property (reading every
+    // dashConfig visible/position property so the binding depends on all of
+    // them), rather than a per-lane function the bindings would call ~9 times
+    // per change.
+    readonly property var lanes: {
+        const defs = [
+            { key: "rpm",      visible: dashConfig.rpmVisible,      pos: dashConfig.rpmPosition },
+            { key: "speed",    visible: dashConfig.speedVisible,    pos: dashConfig.speedPosition },
+            { key: "coolant",  visible: dashConfig.coolantVisible,  pos: dashConfig.coolantPosition },
+            { key: "oiltemp",  visible: dashConfig.oilTempVisible,  pos: dashConfig.oilTempPosition },
+            { key: "gear",     visible: dashConfig.gearVisible,     pos: dashConfig.gearPosition },
+            { key: "laptimer", visible: dashConfig.lapTimerVisible, pos: dashConfig.lapTimerPosition },
+        ]
+        const out = [[], [], []]
+        for (const d of defs)
+            if (d.visible)
+                out[dashboardRoot.colForPosition(d.pos)].push(d)
+        for (const lane of out)
+            lane.sort((a, b) => dashboardRoot.rowForPosition(a.pos) - dashboardRoot.rowForPosition(b.pos))
+        return [out[0].map(d => d.key), out[1].map(d => d.key), out[2].map(d => d.key)]
+    }
+
+    function componentFor(key) {
+        switch (key) {
+            case "rpm":      return rpmComp
+            case "speed":    return speedComp
+            case "coolant":  return coolantComp
+            case "oiltemp":  return oilTempComp
+            case "gear":     return gearComp
+            case "laptimer": return lapTimerComp
+        }
+        return null
     }
 
     Component {
@@ -49,7 +98,7 @@ Item {
             anchors.fill: parent
             label: "RPM"
             value: dataModel.rpm
-            maxValue: 8000
+            compact: true
         }
     }
 
@@ -74,8 +123,8 @@ Item {
             value: dataModel.coolantTemp
             maxValue: 120
             decimalPlaces: 1
-            warningThreshold: 95
-            dangerThreshold: 105
+            warningThreshold: dashConfig.coolantWarningTemp
+            dangerThreshold: dashConfig.coolantDangerTemp
         }
     }
 
@@ -89,8 +138,23 @@ Item {
             value: dataModel.oilTemp
             maxValue: 150
             decimalPlaces: 1
-            warningThreshold: 120
-            dangerThreshold: 135
+            warningThreshold: dashConfig.oilWarningTemp
+            dangerThreshold: dashConfig.oilDangerTemp
+        }
+    }
+
+    Component {
+        id: gearComp
+        GearIndicator {
+            anchors.fill: parent
+            gear: dataModel.gear
+        }
+    }
+
+    Component {
+        id: lapTimerComp
+        LapTimer {
+            anchors.fill: parent
         }
     }
 
@@ -117,31 +181,30 @@ Item {
             Layout.fillWidth: true
             Layout.fillHeight: true
             spacing: 8
-            visible: zoneHasContent("left") || zoneHasContent("center") || zoneHasContent("right") || dashConfig.lapTimerVisible
+            visible: dashboardRoot.lanes[0].length > 0 || dashboardRoot.lanes[1].length > 0
+                     || dashboardRoot.lanes[2].length > 0
 
+            // Three independent lanes (left/center/right), each a plain
+            // ColumnLayout over just the entities assigned to it. A lane
+            // with one entity gives it the full lane height; two split it
+            // evenly; three split it three ways — ColumnLayout does that
+            // for free, so a sparsely-populated lane never leaves a gauge
+            // stranded in a fraction of the space. An empty lane collapses
+            // entirely and its width goes to the remaining lanes.
             ColumnLayout {
                 Layout.fillWidth: true
                 Layout.fillHeight: true
                 spacing: 8
-                visible: zoneHasContent("left") || dashConfig.lapTimerVisible
+                visible: dashboardRoot.lanes[0].length > 0
 
-                Gauge {
-                    visible: dashConfig.rpmVisible && dashConfig.rpmPosition === "left"
-                    Layout.fillWidth: true
-                    Layout.preferredHeight: 105
-                    label: "RPM"
-                    value: dataModel.rpm
-                    maxValue: 8000
-                    compact: true
-                }
-                Loader { active: dashConfig.speedVisible   && dashConfig.speedPosition   === "left"; visible: active; Layout.fillWidth: true; Layout.fillHeight: true; sourceComponent: speedComp }
-                Loader { active: dashConfig.coolantVisible && dashConfig.coolantPosition === "left"; visible: active; Layout.fillWidth: true; Layout.fillHeight: true; sourceComponent: coolantComp }
-                Loader { active: dashConfig.oilTempVisible && dashConfig.oilTempPosition === "left"; visible: active; Layout.fillWidth: true; Layout.fillHeight: true; sourceComponent: oilTempComp }
-
-                LapTimer {
-                    visible: dashConfig.lapTimerVisible
-                    Layout.fillWidth: true
-                    Layout.fillHeight: true
+                Repeater {
+                    model: dashboardRoot.lanes[0]
+                    delegate: Loader {
+                        required property string modelData
+                        Layout.fillWidth: true
+                        Layout.fillHeight: true
+                        sourceComponent: dashboardRoot.componentFor(modelData)
+                    }
                 }
             }
 
@@ -149,31 +212,34 @@ Item {
                 Layout.fillWidth: true
                 Layout.fillHeight: true
                 spacing: 8
-                visible: zoneHasContent("center")
+                visible: dashboardRoot.lanes[1].length > 0
 
-                GearIndicator {
-                    visible: dashConfig.gearVisible
-                    Layout.fillWidth: true
-                    Layout.fillHeight: true
-                    gear: dataModel.gear
+                Repeater {
+                    model: dashboardRoot.lanes[1]
+                    delegate: Loader {
+                        required property string modelData
+                        Layout.fillWidth: true
+                        Layout.fillHeight: true
+                        sourceComponent: dashboardRoot.componentFor(modelData)
+                    }
                 }
-
-                Loader { active: dashConfig.rpmVisible     && dashConfig.rpmPosition     === "center"; visible: active; Layout.fillWidth: true; Layout.fillHeight: true; sourceComponent: rpmComp }
-                Loader { active: dashConfig.speedVisible   && dashConfig.speedPosition   === "center"; visible: active; Layout.fillWidth: true; Layout.fillHeight: true; sourceComponent: speedComp }
-                Loader { active: dashConfig.coolantVisible && dashConfig.coolantPosition === "center"; visible: active; Layout.fillWidth: true; Layout.fillHeight: true; sourceComponent: coolantComp }
-                Loader { active: dashConfig.oilTempVisible && dashConfig.oilTempPosition === "center"; visible: active; Layout.fillWidth: true; Layout.fillHeight: true; sourceComponent: oilTempComp }
             }
 
             ColumnLayout {
                 Layout.fillWidth: true
                 Layout.fillHeight: true
                 spacing: 8
-                visible: zoneHasContent("right")
+                visible: dashboardRoot.lanes[2].length > 0
 
-                Loader { active: dashConfig.rpmVisible     && dashConfig.rpmPosition     === "right"; visible: active; Layout.fillWidth: true; Layout.fillHeight: true; sourceComponent: rpmComp }
-                Loader { active: dashConfig.speedVisible   && dashConfig.speedPosition   === "right"; visible: active; Layout.fillWidth: true; Layout.fillHeight: true; sourceComponent: speedComp }
-                Loader { active: dashConfig.coolantVisible && dashConfig.coolantPosition === "right"; visible: active; Layout.fillWidth: true; Layout.fillHeight: true; sourceComponent: coolantComp }
-                Loader { active: dashConfig.oilTempVisible && dashConfig.oilTempPosition === "right"; visible: active; Layout.fillWidth: true; Layout.fillHeight: true; sourceComponent: oilTempComp }
+                Repeater {
+                    model: dashboardRoot.lanes[2]
+                    delegate: Loader {
+                        required property string modelData
+                        Layout.fillWidth: true
+                        Layout.fillHeight: true
+                        sourceComponent: dashboardRoot.componentFor(modelData)
+                    }
+                }
             }
         }
 

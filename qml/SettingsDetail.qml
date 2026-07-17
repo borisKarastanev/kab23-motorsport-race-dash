@@ -12,7 +12,7 @@ Item {
     // Inline component declarations — one per settings section.
     // Each future per-item plan replaces the placeholder here and adds
     // its real QML file; no navigation code changes needed.
-    Component { id: compUi;             PlaceholderSetting { title: "CONFIGURE UI" } }
+    Component { id: compLayout;         DashboardLayout {} }
     Component { id: compNetwork;        NetworkMenu {} }
     Component { id: compNetworkWifi;    WifiDetail {} }
     Component { id: compNetworkWired;   WiredDetail {} }
@@ -29,7 +29,8 @@ Item {
 
     function registryFor(key) {
         switch (key) {
-            case "ui":              return compUi
+            case "layout":          return compLayout
+            case "ui":              return compLayout // legacy key alias
             case "network":         return compNetwork
             case "network-wifi":    return compNetworkWifi
             case "network-wired":   return compNetworkWired
@@ -43,7 +44,7 @@ Item {
             case "device-stats":    return compDeviceStats
             case "device-log":      return compDeviceLog
             case "display":         return compDisplay
-            default:                return compUi
+            default:                return compLayout
         }
     }
 

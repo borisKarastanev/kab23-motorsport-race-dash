@@ -8,6 +8,10 @@
         <file>qml/SettingsMenu.qml</file>
         <file>qml/SettingsDetail.qml</file>
         <file>qml/settings/PlaceholderSetting.qml</file>
+        <file>qml/settings/DashboardLayout.qml</file>
+        <file>qml/settings/LayoutCard.qml</file>
+        <file>qml/settings/PositionPickerModal.qml</file>
+        <file>qml/settings/StepperRow.qml</file>
         <file>qml/settings/SessionsList.qml</file>
         <file>qml/settings/SessionGroupsList.qml</file>
         <file>qml/settings/SessionSummary.qml</file>
