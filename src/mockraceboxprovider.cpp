@@ -20,7 +20,8 @@ void MockRaceBoxProvider::defaultFinishLine(double &latA, double &lonA, double &
     // +longitude direction, so a gate spanning the track runs along latitude.
     const double centerLat = kTrackLat + kTrackRadius;
     const double centerLon = kTrackLon;
-    const double halfWidthDeg = 15.0 / 111132.0; // ~15 m each side (30 m gate)
+    const double halfWidthDeg = 12.5 / 111132.0; // ~12.5 m each side (25 m gate) — matches
+                                                  // kLearnGateHalfWidthM in raceboxmodel.cpp
     latA = centerLat + halfWidthDeg; lonA = centerLon;
     latB = centerLat - halfWidthDeg; lonB = centerLon;
 }

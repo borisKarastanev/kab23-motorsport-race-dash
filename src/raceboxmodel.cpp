@@ -16,8 +16,9 @@ constexpr qint64 kMinLapMs            = 3000;  // debounce: reject re-crossings 
 constexpr qint64 kMaxFixGapMs         = 500;   // don't bridge a stall (missed/burst fixes)
                                                // into one long segment — the interpolation
                                                // and geometry can't be trusted across it
-constexpr double kLearnGateHalfWidthM = 20.0;  // learned gate spans 40 m across the track
-                                               // (matches the old finish circle's diameter)
+constexpr double kLearnGateHalfWidthM = 12.5;  // learned gate spans 25 m across the track —
+                                               // comfortably covers real track widths without
+                                               // dominating a single-lap map's auto-fit scale
 constexpr double kGatePrefilterM      = 250.0; // skip crossing math when clearly far away
 
 // Heading is measured from a moving anchor rather than from the previous fix: the
