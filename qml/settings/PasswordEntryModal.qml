@@ -4,12 +4,13 @@ import QtQuick 2.15
 // on-screen keyboard and CANCEL/SUBMIT buttons. Kept free of any specific
 // backend so both the sudo/update flow (PasswordModal) and the Wi-Fi join
 // flow (WifiPasswordModal) can drive it via properties + signals. The parent
-// controls `visible`; this only reports what the user typed.
-Item {
+// controls `visible`; this only reports what the user typed. Composes the
+// shared ModalScaffold (TICKET-modal-scaffold-extraction).
+ModalScaffold {
     id: root
-    anchors.fill: parent
-    visible: false
-    z: 100
+    // 560 fits OnScreenKeyboard's widest row (10 keys + spacing) plus
+    // margins at its current key sizes — bump this if those change.
+    maxPanelWidth: 560
 
     property string title: ""
     property bool busy: false
@@ -24,129 +25,93 @@ Item {
 
     onVisibleChanged: if (visible) enteredPassword = ""
 
-    // dim backdrop — swallows all clicks behind the modal
-    Rectangle {
-        anchors.fill: parent
-        color: "#000000"
-        opacity: 0.7
-
-        MouseArea {
-            anchors.fill: parent
-            onClicked: {} // absorb clicks
-        }
+    Text {
+        text: root.title
+        color: "#cccccc"
+        font.pixelSize: 12
+        font.bold: true
+        font.family: "monospace"
+        font.letterSpacing: 1
+        wrapMode: Text.WordWrap
+        width: parent.width
     }
 
     Rectangle {
-        id: panel
-        anchors.centerIn: parent
-        // 560 fits OnScreenKeyboard's widest row (10 keys + spacing) plus
-        // margins at its current key sizes — bump this if those change.
-        width: Math.min(560, root.width - 40)
-        height: contentColumn.height + 32
-        color: "#0d0d0d"
-        border.color: "#2a2a2a"
+        width: parent.width
+        height: 34
+        color: "#111111"
+        border.color: root.wrongPass ? "#cc4444" : "#2a2a2a"
         border.width: 1
-        radius: 3
+        radius: 2
 
-        MouseArea { anchors.fill: parent; onClicked: {} } // absorb clicks
-
-        Column {
-            id: contentColumn
-            anchors.top: parent.top
+        Text {
             anchors.left: parent.left
-            anchors.right: parent.right
-            anchors.margins: 16
-            spacing: 12
+            anchors.leftMargin: 10
+            anchors.verticalCenter: parent.verticalCenter
+            text: "•".repeat(root.enteredPassword.length)
+            color: "#cccccc"
+            font.pixelSize: 16
+            font.family: "monospace"
+        }
+    }
 
-            Text {
-                text: root.title
-                color: "#cccccc"
-                font.pixelSize: 12
-                font.bold: true
-                font.family: "monospace"
-                font.letterSpacing: 1
-                wrapMode: Text.WordWrap
-                width: parent.width
-            }
+    Text {
+        visible: root.wrongPass
+        text: root.wrongLabel
+        color: "#cc4444"
+        font.pixelSize: 10
+        font.family: "monospace"
+        font.letterSpacing: 1
+    }
 
-            Rectangle {
-                width: parent.width
-                height: 34
-                color: "#111111"
-                border.color: root.wrongPass ? "#cc4444" : "#2a2a2a"
-                border.width: 1
-                radius: 2
+    Text {
+        visible: root.busy
+        text: root.busyLabel
+        color: "#888888"
+        font.pixelSize: 10
+        font.family: "monospace"
+        font.letterSpacing: 1
+    }
 
-                Text {
-                    anchors.left: parent.left
-                    anchors.leftMargin: 10
-                    anchors.verticalCenter: parent.verticalCenter
-                    text: "•".repeat(root.enteredPassword.length)
-                    color: "#cccccc"
-                    font.pixelSize: 16
-                    font.family: "monospace"
-                }
-            }
+    OnScreenKeyboard {
+        width: parent.width
+        opacity: root.busy ? 0.5 : 1.0
+        enabled: !root.busy
 
-            Text {
-                visible: root.wrongPass
-                text: root.wrongLabel
-                color: "#cc4444"
-                font.pixelSize: 10
-                font.family: "monospace"
-                font.letterSpacing: 1
-            }
+        onKeyPressed: function(ch) { root.enteredPassword += ch }
+        onBackspace: {
+            if (root.enteredPassword.length > 0)
+                root.enteredPassword = root.enteredPassword.slice(0, -1)
+        }
+        onDone: {
+            if (root.enteredPassword.length > 0)
+                root.submitted(root.enteredPassword)
+        }
+    }
 
-            Text {
-                visible: root.busy
-                text: root.busyLabel
-                color: "#888888"
-                font.pixelSize: 10
-                font.family: "monospace"
-                font.letterSpacing: 1
-            }
+    Row {
+        width: parent.width
+        spacing: 8
 
-            OnScreenKeyboard {
-                width: parent.width
-                opacity: root.busy ? 0.5 : 1.0
-                enabled: !root.busy
+        TextButton {
+            width: (parent.width - 8) / 2
+            text: "CANCEL"
+            textColor: "#888888"
+            pressedColor: "#111111"
+            border.color: "#2a2a2a"
+            enabled: !root.busy
+            onClicked: root.cancelled()
+        }
 
-                onKeyPressed: function(ch) { root.enteredPassword += ch }
-                onBackspace: {
-                    if (root.enteredPassword.length > 0)
-                        root.enteredPassword = root.enteredPassword.slice(0, -1)
-                }
-                onDone: {
-                    if (root.enteredPassword.length > 0)
-                        root.submitted(root.enteredPassword)
-                }
-            }
-
-            Row {
-                width: parent.width
-                spacing: 8
-
-                TextButton {
-                    width: (parent.width - 8) / 2
-                    text: "CANCEL"
-                    textColor: "#888888"
-                    pressedColor: "#111111"
-                    border.color: "#2a2a2a"
-                    enabled: !root.busy
-                    onClicked: root.cancelled()
-                }
-
-                TextButton {
-                    width: (parent.width - 8) / 2
-                    text: "SUBMIT"
-                    textColor: "#00cc44"
-                    pressedColor: "#112211"
-                    border.color: "#2a4a2a"
-                    opacity: root.enteredPassword.length > 0 && !root.busy ? 1.0 : 0.5
-                    enabled: root.enteredPassword.length > 0 && !root.busy
-                    onClicked: root.submitted(root.enteredPassword)
-                }
-            }
+        TextButton {
+            width: (parent.width - 8) / 2
+            text: "SUBMIT"
+            textColor: "#00cc44"
+            pressedColor: "#112211"
+            border.color: "#2a4a2a"
+            opacity: root.enteredPassword.length > 0 && !root.busy ? 1.0 : 0.5
+            enabled: root.enteredPassword.length > 0 && !root.busy
+            onClicked: root.submitted(root.enteredPassword)
         }
     }
 }
