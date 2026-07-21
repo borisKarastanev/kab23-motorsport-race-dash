@@ -8,7 +8,15 @@ Item {
     // latestTitle, count, sessions: [records newest-first]}.
     property var payload: ({})
 
-    readonly property var trackSessions: payload.sessions || []
+    readonly property string trackId: payload.trackId || ""
+
+    // Re-derived from the live model rather than bound to the pushed payload
+    // snapshot, so deleting a session in Details and popping back here shows
+    // the updated list immediately instead of the stale entry.
+    readonly property var trackSessions: {
+        const group = sessionModel.sessionGroups.find(g => g.trackId === trackId)
+        return group ? group.sessions : []
+    }
 
     ListView {
         anchors.fill: parent

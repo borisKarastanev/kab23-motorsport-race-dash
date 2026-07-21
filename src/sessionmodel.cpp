@@ -148,6 +148,31 @@ void SessionModel::saveCurrentSession()
                   << "| top speed:" << m_topSpeedKmh << "km/h";
 }
 
+void SessionModel::deleteSession(const QString &timestampIso)
+{
+    for (int i = 0; i < m_sessions.size(); ++i) {
+        if (m_sessions.at(i).toMap().value("timestampIso").toString() != timestampIso)
+            continue;
+
+        m_sessions.removeAt(i);
+        rebuildSessionGroups();
+        persist();
+        emit sessionsChanged();
+        qCInfo(lcApp) << "Session deleted —" << timestampIso;
+        return;
+    }
+    qCWarning(lcApp) << "deleteSession: no session found with timestampIso" << timestampIso;
+}
+
+bool SessionModel::hasSessionsForTrack(const QString &trackId) const
+{
+    for (const QVariant &v : m_sessions) {
+        if (v.toMap().value("trackId").toString() == trackId)
+            return true;
+    }
+    return false;
+}
+
 void SessionModel::rebuildSessionGroups()
 {
     // m_sessions is already newest-first (prepend on save); iterating in that

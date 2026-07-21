@@ -30,6 +30,13 @@ public:
     bool canSave() const { return m_canSave; }
 
     Q_INVOKABLE void saveCurrentSession();
+    // No-op (with a warning logged) if no session matches timestampIso.
+    Q_INVOKABLE void deleteSession(const QString &timestampIso);
+    // Whether any saved session still belongs to trackId (empty = the "unknown"
+    // bucket). Drives post-delete navigation: the Details view pops one step
+    // back to the track's remaining sessions when true, or all the way to the
+    // track-groups list when the last session for the track is gone.
+    Q_INVOKABLE bool hasSessionsForTrack(const QString &trackId) const;
 
 signals:
     void sessionsChanged();
