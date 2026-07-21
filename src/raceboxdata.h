@@ -8,6 +8,13 @@
 // MockRaceBoxProvider (encoder) and RaceBoxModel (decoder).
 static constexpr double kMmSPerKmh = 277.778;
 
+// The car is treated as stationary at or below this ground speed (km/h): GPS
+// ground speed jitters by a km/h or two even while genuinely parked, especially
+// without a satellite lock. One shared threshold so the displayed-speed noise
+// floor and lap-crossing rejection (RaceBoxModel) and the nearby-track "parked"
+// gate (TrackModel) can't drift apart when it's tuned.
+static constexpr int kStationarySpeedKmh = 3;
+
 struct RaceBoxData {
     quint8  fixStatus;   // 0=no fix, 2=2D, 3=3D
     quint8  fixFlags;    // bit 0 = valid fix
