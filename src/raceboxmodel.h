@@ -80,6 +80,11 @@ public:
     double lastLat() const { return m_lastLat; }
     double lastLon() const { return m_lastLon; }
 
+    // Last decoded ground speed (km/h). Read by TrackModel to gate the
+    // nearest-track suggestion on the car being parked. Reset to 0 on disconnect
+    // so a value latched while moving can't survive a dropout as a stale reading.
+    int    speedKmh() const { return m_speedKmh; }
+
     // Shared distance helper — also used by TrackModel for nearest-track scans
     static double haversineM(double lat1, double lon1, double lat2, double lon2);
 

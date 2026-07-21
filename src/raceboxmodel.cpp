@@ -200,6 +200,7 @@ void RaceBoxModel::onConnectionStateChanged(bool connected)
         m_hasFix = false;
         m_havePrevFix = false;       // stale previous fix must not bridge a reconnect
         m_haveHeadingAnchor = false; // nor anchor a bearing across the gap
+        m_speedKmh = 0;              // don't leave a moving-speed reading latched across a dropout
         m_dirty |= kDirtyFix;
     }
 }
