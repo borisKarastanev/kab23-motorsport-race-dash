@@ -41,6 +41,8 @@ private slots:
     void reverseCrossingRejected();
     void secondSameDirectionCrossingCompletesLap();
     void batteryAndGForceDecodeIndependentOfFix();
+    void lowSpeedNoiseFlooredToZero();
+    void speedAboveNoiseFloorReportedExactly();
     void cannotLearnFinishLineWithoutFix();
     void learnFinishLineNoOpWithoutHeading();
     void learnFinishLineSucceedsOnceMoving();
@@ -151,6 +153,38 @@ void TestRaceBoxModel::batteryAndGForceDecodeIndependentOfFix()
 
     QCOMPARE(model.batteryPercent(), 82);
     QCOMPARE(model.batteryCharging(), true);
+}
+
+void TestRaceBoxModel::lowSpeedNoiseFlooredToZero()
+{
+    RaceBoxModel model;
+    QSignalSpy speedSpy(&model, &RaceBoxModel::speedKmhChanged);
+
+    // Regression guard: without a satellite lock the reported GPS speed jitters
+    // between ~0-2 km/h while genuinely parked. Anything below the noise floor
+    // must be reported as a flat 0, not flicker the dashboard.
+    model.onData(makeFix(0.0, 0.0, /*hasFix=*/false, /*speedMmS=*/278));  // ~1 km/h
+    QCOMPARE(model.speedKmh(), 0);
+    QCOMPARE(speedSpy.count(), 0); // starts at 0; flooring to 0 must not emit a change
+
+    model.onData(makeFix(0.0, 0.0, /*hasFix=*/false, /*speedMmS=*/556));  // ~2 km/h
+    QCOMPARE(model.speedKmh(), 0);
+    QCOMPARE(speedSpy.count(), 0);
+}
+
+void TestRaceBoxModel::speedAboveNoiseFloorReportedExactly()
+{
+    RaceBoxModel model;
+    QSignalSpy speedSpy(&model, &RaceBoxModel::speedKmhChanged);
+
+    model.onData(makeFix(0.0, 0.0, /*hasFix=*/false, /*speedMmS=*/834)); // ~3 km/h, at the floor
+    QCOMPARE(model.speedKmh(), 3);
+    QCOMPARE(speedSpy.count(), 1);
+    QCOMPARE(speedSpy.takeFirst().at(0).toInt(), 3);
+
+    model.onData(makeFix(0.0, 0.0, /*hasFix=*/false, /*speedMmS=*/16667)); // ~60 km/h
+    QCOMPARE(model.speedKmh(), 60);
+    QCOMPARE(speedSpy.count(), 1);
 }
 
 void TestRaceBoxModel::cannotLearnFinishLineWithoutFix()

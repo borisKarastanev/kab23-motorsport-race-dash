@@ -16,9 +16,6 @@
 namespace {
 constexpr double kDetectRadiusM = 5000.0;
 constexpr int    kDetectIntervalMs = 5000;
-// Above this, the car is being driven rather than parked — matches the GPS-jitter
-// tolerance RaceBoxModel uses to distinguish "stopped" from "genuinely moving".
-constexpr int    kStationaryMaxKmh = 3;
 const char *kMockTrackId = "mock-track";
 }
 
@@ -50,7 +47,7 @@ TrackModel::TrackModel(RaceBoxModel *raceBoxModel, bool mockMode, QObject *paren
         // so withdrawing it has to be driven by the speed change, not the scan.
         // Resume scanning so it can re-appear at the next stop. New suggestions are
         // separately suppressed in scanNearestTrack.
-        if (kmh > kStationaryMaxKmh && !m_suggestedTrackId.isEmpty()) {
+        if (kmh > kStationarySpeedKmh && !m_suggestedTrackId.isEmpty()) {
             m_suggestedTrackId.clear();
             emit trackSuggestionChanged();
             if (m_raceBoxModel->hasFix() && !m_manuallySelectedThisRun && m_activeTrackId.isEmpty())
@@ -395,7 +392,7 @@ void TrackModel::scanNearestTrack()
     // Only prompt while parked — a suggestion popping up mid-drive is a
     // distraction, and the driver can't safely deal with it anyway. Keep the
     // timer running so the scan retries once the car stops.
-    if (m_raceBoxModel->speedKmh() > kStationaryMaxKmh)
+    if (m_raceBoxModel->speedKmh() > kStationarySpeedKmh)
         return;
 
     const double lat = m_raceBoxModel->lastLat();

@@ -9,9 +9,6 @@ static constexpr double kEarthRadiusM   = 6371000.0;
 static constexpr double kMetersPerDegLat = 111132.0;
 
 namespace {
-constexpr double kMinCrossSpeedKmh    = 3.0;   // only reject genuinely-parked GPS jitter;
-                                               // a real slow crossing (hairpin S/F, kart)
-                                               // must still count
 constexpr qint64 kMinLapMs            = 3000;  // debounce: reject re-crossings within 3 s
 constexpr qint64 kMaxFixGapMs         = 500;   // don't bridge a stall (missed/burst fixes)
                                                // into one long segment — the interpolation
@@ -237,7 +234,8 @@ void RaceBoxModel::onData(const RaceBoxData &d)
     if (m_batteryPercent  != batt)     { m_batteryPercent  = batt;     m_dirty |= kDirtyBattery; }
     if (m_batteryCharging != charging) { m_batteryCharging = charging; m_dirty |= kDirtyCharging; }
 
-    const int kmhInt = static_cast<int>(d.speedMmS / kMmSPerKmh);
+    int kmhInt = static_cast<int>(d.speedMmS / kMmSPerKmh);
+    if (kmhInt < kStationarySpeedKmh) kmhInt = 0; // floor GPS jitter to a steady 0 while parked
     if (kmhInt != m_speedKmh) { m_speedKmh = kmhInt; emit speedKmhChanged(kmhInt); }
 
     if (fix) {
@@ -292,7 +290,9 @@ void RaceBoxModel::updateLapTiming(double prevLat, double prevLon, double curLat
                                   double speedKmh, qint64 prevMs, qint64 nowMs)
 {
     if (!m_finishLineSet) return;
-    if (speedKmh <= kMinCrossSpeedKmh) return; // stationary GPS jitter — ignore
+    if (speedKmh <= kStationarySpeedKmh) return; // parked GPS jitter — ignore (a real slow
+                                                 // crossing, e.g. a hairpin S/F or a kart, is
+                                                 // above this and still counts)
     if (nowMs - prevMs > kMaxFixGapMs) return; // fixes too far apart in time to bridge
 
     // Cheap pre-filter — skip the crossing math when both fixes are clearly far
