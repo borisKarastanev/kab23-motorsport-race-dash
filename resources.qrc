@@ -27,6 +27,7 @@
         <file>qml/settings/WifiDetail.qml</file>
         <file>qml/settings/WifiPasswordModal.qml</file>
         <file>qml/settings/WiredDetail.qml</file>
+        <file>qml/settings/ModalScaffold.qml</file>
         <file>qml/settings/PasswordEntryModal.qml</file>
         <file>qml/settings/ConfirmModal.qml</file>
         <file>qml/settings/SessionNav.js</file>

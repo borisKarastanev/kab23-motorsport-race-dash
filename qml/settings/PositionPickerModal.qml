@@ -7,6 +7,14 @@ import QtQuick.Window 2.15
 // square swaps that entity into the caller's old cell (DashConfig.
 // setEntityPosition() does the swap; this component has no layout logic of
 // its own, it just renders DashConfig's current state and forwards the tap).
+//
+// Not migrated to ModalScaffold.qml (TICKET-modal-scaffold-extraction): its
+// root Rectangle *is* the backdrop at #cc000000 (~0.8 alpha), vs the
+// scaffold's separate `color: "#000000"; opacity: 0.7` backdrop. Matching it
+// exactly would mean adding a backdrop color/opacity knob for this single
+// caller, which the ticket explicitly calls out as over-generalizing. Every
+// other knob (coverWindow, overlayZ, dismissOnBackdrop, fixed panel size,
+// radius, margins/spacing) maps cleanly — this is the one that doesn't.
 Rectangle {
     id: root
     // Reparent to the window's content item so the overlay covers the whole
