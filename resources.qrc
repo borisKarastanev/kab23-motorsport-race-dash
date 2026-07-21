@@ -28,6 +28,8 @@
         <file>qml/settings/WifiPasswordModal.qml</file>
         <file>qml/settings/WiredDetail.qml</file>
         <file>qml/settings/PasswordEntryModal.qml</file>
+        <file>qml/settings/ConfirmModal.qml</file>
+        <file>qml/settings/SessionNav.js</file>
         <file>qml/settings/PasswordModal.qml</file>
         <file>qml/settings/OnScreenKeyboard.qml</file>
         <file>qml/settings/TextButton.qml</file>

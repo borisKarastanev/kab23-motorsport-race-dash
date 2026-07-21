@@ -1,6 +1,7 @@
 import QtQuick 2.15
 import QtQuick.Controls.Basic
 import "settings"
+import "settings/SessionNav.js" as SessionNav
 
 Item {
     id: detailRoot
@@ -8,6 +9,8 @@ Item {
     property string settingKey: ""
     property string title: ""
     property var    payload:    ({})
+
+    readonly property bool isSessionSummary: settingKey === "session-summary"
 
     // Inline component declarations — one per settings section.
     // Each future per-item plan replaces the placeholder here and adds
@@ -99,6 +102,20 @@ Item {
             font.family: "monospace"
             font.letterSpacing: 2
         }
+
+        TextButton {
+            id: deleteBtn
+            visible: detailRoot.isSessionSummary
+            anchors.right: parent.right
+            anchors.rightMargin: 12
+            anchors.verticalCenter: parent.verticalCenter
+            height: 26
+            text: "DELETE"
+            textColor: "#cc4444"
+            pressedColor: "#221111"
+            border.color: "#4a2a2a"
+            onClicked: deleteConfirmModal.visible = true
+        }
     }
 
     // ── content area ─────────────────────────────────────────
@@ -112,6 +129,24 @@ Item {
         onLoaded: {
             if ("payload"   in item) item.payload   = detailRoot.payload
             if ("stackView" in item) item.stackView = detailRoot.StackView.view
+        }
+    }
+
+    // ── delete confirmation ─────────────────────────────────────
+    ConfirmModal {
+        id: deleteConfirmModal
+        title: "DELETE SESSION?"
+        message: "This session's laps and stats will be permanently removed. This cannot be undone."
+        confirmLabel: "DELETE"
+        cancelLabel: "CANCEL"
+
+        onCancelled: visible = false
+        onConfirmed: {
+            visible = false
+            var view = detailRoot.StackView.view
+            var trackId = detailRoot.payload.trackId || ""
+            sessionModel.deleteSession(detailRoot.payload.timestampIso)
+            SessionNav.popAfterDelete(view, sessionModel, trackId)
         }
     }
 }

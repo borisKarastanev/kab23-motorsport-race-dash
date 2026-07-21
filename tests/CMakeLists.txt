@@ -60,6 +60,22 @@ target_link_libraries(tst_trackmodel PRIVATE Qt6::Test Qt6::Network)
 add_test(NAME tst_trackmodel COMMAND tst_trackmodel)
 set_tests_properties(tst_trackmodel PROPERTIES ENVIRONMENT "${DASH_TEST_ENV}")
 
+# ── sessionmodel: delete/persist/regroup on session records ───────────
+# Seeds sessions.json directly (bypassing the lap-completion signal chain
+# saveCurrentSession() depends on); uses QStandardPaths::setTestModeEnabled()
+# to sandbox AppPaths-backed persistence away from the real user's sessions.
+add_executable(tst_sessionmodel cpp/tst_sessionmodel.cpp
+    ${APP_SRC_DIR}/src/sessionmodel.cpp
+    ${APP_SRC_DIR}/src/candatamodel.cpp
+    ${APP_SRC_DIR}/src/raceboxmodel.cpp
+    ${APP_SRC_DIR}/src/trackmodel.cpp
+    ${APP_SRC_DIR}/src/logging.cpp
+)
+target_include_directories(tst_sessionmodel PRIVATE ${APP_SRC_DIR})
+target_link_libraries(tst_sessionmodel PRIVATE Qt6::Test Qt6::SerialBus Qt6::Network)
+add_test(NAME tst_sessionmodel COMMAND tst_sessionmodel)
+set_tests_properties(tst_sessionmodel PROPERTIES ENVIRONMENT "${DASH_TEST_ENV}")
+
 # ── displaymodel: backlight discovery/scaling/persistence ─────────────
 # Uses QStandardPaths::setTestModeEnabled() (see tst_displaymodel.cpp) to
 # sandbox AppPaths-backed persistence, plus a fake sysfs backlight tree under
