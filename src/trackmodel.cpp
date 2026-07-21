@@ -16,6 +16,9 @@
 namespace {
 constexpr double kDetectRadiusM = 5000.0;
 constexpr int    kDetectIntervalMs = 5000;
+// Above this, the car is being driven rather than parked — matches the GPS-jitter
+// tolerance RaceBoxModel uses to distinguish "stopped" from "genuinely moving".
+constexpr int    kStationaryMaxKmh = 3;
 const char *kMockTrackId = "mock-track";
 }
 
@@ -40,6 +43,19 @@ TrackModel::TrackModel(RaceBoxModel *raceBoxModel, bool mockMode, QObject *paren
     connect(m_raceBoxModel, &RaceBoxModel::hasFixChanged, this, [this]() {
         if (m_raceBoxModel->hasFix() && !m_manuallySelectedThisRun && m_suggestedTrackId.isEmpty())
             m_detectTimer.start();
+    });
+    connect(m_raceBoxModel, &RaceBoxModel::speedKmhChanged, this, [this](int kmh) {
+        // A suggestion that surfaced while parked must not linger on screen once
+        // the car pulls away — the timer is stopped while a suggestion is pending,
+        // so withdrawing it has to be driven by the speed change, not the scan.
+        // Resume scanning so it can re-appear at the next stop. New suggestions are
+        // separately suppressed in scanNearestTrack.
+        if (kmh > kStationaryMaxKmh && !m_suggestedTrackId.isEmpty()) {
+            m_suggestedTrackId.clear();
+            emit trackSuggestionChanged();
+            if (m_raceBoxModel->hasFix() && !m_manuallySelectedThisRun && m_activeTrackId.isEmpty())
+                m_detectTimer.start();
+        }
     });
 
     loadUserState(); // cheap; needed by applyStartupFinishLine() before the DB is ready
@@ -371,10 +387,16 @@ void TrackModel::toggleFavorite(const QString &id)
 
 void TrackModel::scanNearestTrack()
 {
-    if (m_manuallySelectedThisRun) {
+    if (m_manuallySelectedThisRun || !m_activeTrackId.isEmpty()) {
         m_detectTimer.stop();
         return;
     }
+
+    // Only prompt while parked — a suggestion popping up mid-drive is a
+    // distraction, and the driver can't safely deal with it anyway. Keep the
+    // timer running so the scan retries once the car stops.
+    if (m_raceBoxModel->speedKmh() > kStationaryMaxKmh)
+        return;
 
     const double lat = m_raceBoxModel->lastLat();
     const double lon = m_raceBoxModel->lastLon();
@@ -383,7 +405,7 @@ void TrackModel::scanNearestTrack()
     double nearestDist = kDetectRadiusM;
 
     for (const Track &t : m_tracks) {
-        if (t.id == m_activeTrackId || m_dismissedThisRun.contains(t.id))
+        if (m_dismissedThisRun.contains(t.id))
             continue;
         // Cheap rectangular prefilter before haversine
         if (std::abs(t.lat - lat) > 0.05 || std::abs(t.lon - lon) > 0.05)

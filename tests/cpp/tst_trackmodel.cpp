@@ -3,9 +3,11 @@
 #include <QCoreApplication>
 #include <QFile>
 #include <QDir>
+#include <QMetaObject>
 
 #include "src/trackmodel.h"
 #include "src/raceboxmodel.h"
+#include "src/raceboxdata.h"
 #include "src/apppaths.h"
 
 namespace {
@@ -34,6 +36,30 @@ QStringList idsOf(const QVariantList &tracks)
     return ids;
 }
 
+// Feeds a 3D-fix RaceBoxData sample at (lat, lon) travelling at speedKmh, so
+// RaceBoxModel::lastLat/lastLon and the speed TrackModel gates the auto-detect
+// scan on are both driven the same way a real fix would.
+void feedFix(RaceBoxModel &raceBox, double lat, double lon, double speedKmh)
+{
+    RaceBoxData d{};
+    d.fixStatus = 3;
+    d.fixFlags  = 0x01;
+    d.numSvs    = 8;
+    d.latitude  = lat;
+    d.longitude = lon;
+    d.speedMmS  = static_cast<qint32>(speedKmh * kMmSPerKmh);
+    raceBox.onData(d);
+}
+
+// Directly invokes the private, timer-driven scanNearestTrack() slot rather
+// than waiting out the real 5s detect interval — invocation via the
+// meta-object system bypasses C++ access control the same way a Qt signal
+// connection would.
+void triggerScan(TrackModel &track)
+{
+    QVERIFY(QMetaObject::invokeMethod(&track, "scanNearestTrack"));
+}
+
 }
 
 class TestTrackModel : public QObject {
@@ -45,6 +71,10 @@ private slots:
 
     void filteringBySearchAndCountry();
     void finishLineGlobalFallback();
+    void noSuggestionWhileMoving();
+    void noSuggestionWhenTrackAlreadyActive();
+    void suggestsWhenStationaryAndNoActiveTrack();
+    void suggestionWithdrawnWhenCarStartsMoving();
 };
 
 void TestTrackModel::initTestCase()
@@ -100,6 +130,73 @@ void TestTrackModel::finishLineGlobalFallback()
 
     // Directly asking for the global key returns the same gate.
     QCOMPARE(track.finishLineFor(QString()), fl);
+}
+
+void TestTrackModel::noSuggestionWhileMoving()
+{
+    RaceBoxModel raceBox;
+    TrackModel track(&raceBox, /*mockMode=*/false);
+    QTest::qWait(50);
+
+    // Right on top of spa, but doing 80 km/h — driving through, not parked.
+    feedFix(raceBox, 50.4372, 5.9714, 80.0);
+    triggerScan(track);
+
+    QCOMPARE(track.suggestedTrackId(), QString());
+}
+
+void TestTrackModel::noSuggestionWhenTrackAlreadyActive()
+{
+    RaceBoxModel raceBox;
+    TrackModel track(&raceBox, /*mockMode=*/false);
+    QTest::qWait(50);
+
+    // Stationary at spa with no active track -> auto-detect suggests it.
+    feedFix(raceBox, 50.4372, 5.9714, 0.0);
+    triggerScan(track);
+    QCOMPARE(track.suggestedTrackId(), QString("spa"));
+
+    // Accept it (auto-detected, not a manual pick) so a track is now active.
+    track.acceptSuggestedTrack();
+    QCOMPARE(track.activeTrackId(), QString("spa"));
+
+    // Still stationary, now sitting near a different track (silverstone) —
+    // but a track is already selected, so no new suggestion should surface.
+    feedFix(raceBox, 52.0786, -1.0169, 0.0);
+    triggerScan(track);
+
+    QCOMPARE(track.suggestedTrackId(), QString());
+}
+
+void TestTrackModel::suggestsWhenStationaryAndNoActiveTrack()
+{
+    RaceBoxModel raceBox;
+    TrackModel track(&raceBox, /*mockMode=*/false);
+    QTest::qWait(50);
+
+    feedFix(raceBox, 50.4372, 5.9714, 0.0);
+    triggerScan(track);
+
+    QCOMPARE(track.suggestedTrackId(), QString("spa"));
+}
+
+void TestTrackModel::suggestionWithdrawnWhenCarStartsMoving()
+{
+    RaceBoxModel raceBox;
+    TrackModel track(&raceBox, /*mockMode=*/false);
+    QTest::qWait(50);
+
+    // Parked at spa -> the suggestion surfaces (and the scan stops its timer).
+    feedFix(raceBox, 50.4372, 5.9714, 0.0);
+    triggerScan(track);
+    QCOMPARE(track.suggestedTrackId(), QString("spa"));
+
+    // Driver pulls away without tapping CONFIRM/CANCEL. The lingering modal must
+    // be withdrawn as the car starts moving, not left on screen while driving —
+    // and since the scan timer is stopped while a suggestion is pending, this is
+    // driven by the speed change, not by another scan.
+    feedFix(raceBox, 50.4372, 5.9714, 40.0);
+    QCOMPARE(track.suggestedTrackId(), QString());
 }
 
 QTEST_GUILESS_MAIN(TestTrackModel)
