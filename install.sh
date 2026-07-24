@@ -57,7 +57,11 @@ step "Migrating legacy user data out of build/"
 # This MUST stay in sync with the AppDataLocation path baked into the binary via
 # setApplicationName("bmw-e46-dash") in main.cpp.
 DATA_DIR="$USER_HOME/.local/share/bmw-e46-dash"
-LEGACY_DATA_FILES=(sessions.json tracks-user.json dashboard.conf track-db.json dash.log dash.log.1)
+# track-db.json is intentionally NOT in this list: the "Provisioning bundled
+# track database" step below is now the single owner of seeding that file and
+# always overwrites it with the shipped release, so a legacy build/ copy would
+# just be clobbered a moment later.
+LEGACY_DATA_FILES=(sessions.json tracks-user.json dashboard.conf dash.log dash.log.1)
 if [ -d "$REPO_DIR/build" ]; then
     sudo -u "$DASHBOARD_USER" mkdir -p "$DATA_DIR"
     for f in "${LEGACY_DATA_FILES[@]}"; do
@@ -68,6 +72,22 @@ if [ -d "$REPO_DIR/build" ]; then
             echo "    (migrated $f -> $DATA_DIR)"
         fi
     done
+fi
+
+step "Provisioning bundled track database"
+# Ship this release's track DB (with its confirmed S/F "start" lines) into the
+# stable data dir, overwriting any older downloaded copy. loadDatabase() prefers
+# this on-disk file over the in-binary :/data/track-db.json resource, so without
+# this a device that had once tapped the (now-removed) REFRESH button keeps an
+# old track-db.json with no "start" lines and never sees the confirmed finish
+# lines. Copying on every update keeps the on-disk DB in lock-step with the
+# release. Unconditional overwrite is correct now that REFRESH is disabled —
+# there is no user-refreshed copy to preserve, and the shipped DB is the source
+# of truth for confirmed lines.
+if [ -f "$REPO_DIR/data/track-db.json" ]; then
+    sudo -u "$DASHBOARD_USER" mkdir -p "$DATA_DIR"
+    sudo -u "$DASHBOARD_USER" cp -p "$REPO_DIR/data/track-db.json" "$DATA_DIR/track-db.json"
+    echo "    (provisioned track-db.json -> $DATA_DIR)"
 fi
 
 step "Building application"

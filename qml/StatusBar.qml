@@ -141,6 +141,11 @@ Rectangle {
         // offering a tap that would silently do nothing. "Has a fix but still can't
         // learn" means the heading is the missing half, so prompt the driver to move.
         Rectangle {
+            // NOTE: temporarily left enabled even for tracks with a confirmed
+            // "start" DB line (see trackmodel.cpp/data/track-db.json) so this
+            // can be tested on-track. Re-add
+            // `visible: !trackModel.activeTrackFinishLineLocked` once verified,
+            // to stop users from overwriting a confirmed line.
             height: 20
             width: finishLineLabel.width + 16
             color: mouseArea.pressed ? "#1a2a1a" : "transparent"

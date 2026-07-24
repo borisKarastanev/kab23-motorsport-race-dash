@@ -64,6 +64,12 @@ TrackModel::TrackModel(RaceBoxModel *raceBoxModel, bool mockMode, QObject *paren
     QTimer::singleShot(0, this, [this]() {
         loadDatabase();
         rebuildFiltered();
+        // Confirmed S/F lines live in the track DB, which only finishes loading
+        // here — after main.cpp's early applyStartupFinishLine() ran against an
+        // empty m_tracks and therefore couldn't see them. Re-apply now so a
+        // persisted active track that carries a confirmed line gets its gate
+        // pushed to RaceBoxModel. Idempotent: setFinishLine just sets state.
+        applyStartupFinishLine();
         emit activeTrackChanged(); // active-track name/flags are resolvable now
     });
 }
@@ -118,6 +124,19 @@ bool TrackModel::loadTracksFromJson(const QByteArray &data)
         t.lon     = c[1].toDouble();
         for (const QJsonValue &cfg : obj["configurations"].toArray())
             t.configs.append(cfg.toString());
+
+        // Optional confirmed S/F gate baked into the DB entry itself, as a flat
+        // [lat1, lon1, lat2, lon2] array (same shape as the user-learned finish
+        // lines in tracks-user.json). Present only for tracks we've pinned down
+        // from real session data — see data/track-db.json. Locked: the UI hides
+        // the learn/reset control whenever a track carries one of these.
+        const QJsonArray start = obj["start"].toArray();
+        if (start.size() >= 4) {
+            QVariantMap fl;
+            fl["lat1"] = start[0].toDouble(); fl["lon1"] = start[1].toDouble();
+            fl["lat2"] = start[2].toDouble(); fl["lon2"] = start[3].toDouble();
+            t.confirmedFinishLine = fl;
+        }
         tracks.append(t);
     }
 
@@ -167,11 +186,34 @@ const TrackModel::Track *TrackModel::findTrack(const QString &id) const
     return nullptr;
 }
 
+bool TrackModel::isFinishLineLocked(const QString &id) const
+{
+    const Track *t = findTrack(id);
+    return t && !t->confirmedFinishLine.isEmpty();
+}
+
+QVariantMap TrackModel::gateFor(const QString &id) const
+{
+    // Precedence: a user-learned line (m_finishLines[id]) overrides the track's
+    // confirmed DB gate. In production a confirmed track is locked, so no learned
+    // line is ever stored for it and the confirmed gate is what's returned; the
+    // override only matters in the temporary un-locked testing state, where it
+    // keeps a freshly-learned line consistent across timing, the map, and
+    // reselection instead of being masked by the confirmed gate. No global ("")
+    // fallback here — callers add it where appropriate.
+    if (m_finishLines.contains(id))
+        return m_finishLines.value(id);
+    const Track *t = findTrack(id);
+    if (t && !t->confirmedFinishLine.isEmpty())
+        return t->confirmedFinishLine;
+    return {};
+}
+
 bool TrackModel::emitFinishLineFor(const QString &id)
 {
-    if (!m_finishLines.contains(id))
+    const QVariantMap fl = gateFor(id);
+    if (fl.isEmpty())
         return false;
-    const QVariantMap fl = m_finishLines.value(id);
     emit applyFinishLine(fl["lat1"].toDouble(), fl["lon1"].toDouble(),
                          fl["lat2"].toDouble(), fl["lon2"].toDouble());
     return true;
@@ -179,9 +221,20 @@ bool TrackModel::emitFinishLineFor(const QString &id)
 
 QVariantMap TrackModel::finishLineFor(const QString &trackId) const
 {
-    if (m_finishLines.contains(trackId))
-        return m_finishLines.value(trackId);
+    const QVariantMap fl = gateFor(trackId);
+    if (!fl.isEmpty())
+        return fl;
     return m_finishLines.value(QString()); // global fallback ({} if none)
+}
+
+bool TrackModel::activeTrackHasFinishLine() const
+{
+    return !gateFor(m_activeTrackId).isEmpty();
+}
+
+bool TrackModel::activeTrackFinishLineLocked() const
+{
+    return isFinishLineLocked(m_activeTrackId);
 }
 
 QString TrackModel::activeTrackName() const
@@ -246,7 +299,9 @@ void TrackModel::rebuildFiltered()
             row["name"]          = t.name;
             row["country"]       = t.country;
             row["isFavorite"]    = m_favorites.contains(t.id);
-            row["hasFinishLine"] = m_finishLines.contains(t.id);
+            // t is in hand — read its confirmed gate directly rather than
+            // isFinishLineLocked(t.id), which would re-scan all tracks per row (O(n^2)).
+            row["hasFinishLine"] = !t.confirmedFinishLine.isEmpty() || m_finishLines.contains(t.id);
             row["isActive"]      = (t.id == m_activeTrackId);
             result.append(row);
         }
@@ -454,6 +509,12 @@ void TrackModel::dismissSuggestedTrack()
 
 void TrackModel::onFinishLineLearned(double latA, double lonA, double latB, double lonB)
 {
+    // NOTE: the lock-enforcement guard that used to sit here (rejecting
+    // learned lines for tracks with a confirmed DB "start" gate) is
+    // temporarily removed so the learn/reset flow can be tested live on one
+    // of those tracks. Re-add `if (isFinishLineLocked(m_activeTrackId)) return;`
+    // once verified.
+
     // Keyed by active track id; the empty id ("no track active") holds the
     // global finish line. This is the single persistence path for both cases.
     if (latA == 0.0 && lonA == 0.0 && latB == 0.0 && lonB == 0.0) {
