@@ -23,6 +23,7 @@ class TrackModel : public QObject {
     Q_PROPERTY(QString activeTrackId READ activeTrackId NOTIFY activeTrackChanged)
     Q_PROPERTY(QString activeTrackName READ activeTrackName NOTIFY activeTrackChanged)
     Q_PROPERTY(bool activeTrackHasFinishLine READ activeTrackHasFinishLine NOTIFY activeTrackChanged)
+    Q_PROPERTY(bool activeTrackFinishLineLocked READ activeTrackFinishLineLocked NOTIFY activeTrackChanged)
     Q_PROPERTY(bool autoDetected READ autoDetected NOTIFY activeTrackChanged)
     Q_PROPERTY(QString suggestedTrackId READ suggestedTrackId NOTIFY trackSuggestionChanged)
     Q_PROPERTY(QString suggestedTrackName READ suggestedTrackName NOTIFY trackSuggestionChanged)
@@ -40,7 +41,11 @@ public:
     void setCountryFilter(const QString &country);
     QString activeTrackId() const { return m_activeTrackId; }
     QString activeTrackName() const;
-    bool activeTrackHasFinishLine() const { return m_finishLines.contains(m_activeTrackId); }
+    bool activeTrackHasFinishLine() const;
+    // True when the active track's S/F line is a confirmed gate baked into its
+    // DB entry (Track::confirmedFinishLine) rather than user-learned — the UI
+    // hides the learn/reset control in this case so it can't be overwritten.
+    bool activeTrackFinishLineLocked() const;
     bool autoDetected() const { return m_autoDetected; }
     QString suggestedTrackId() const { return m_suggestedTrackId; }
     QString suggestedTrackName() const;
@@ -89,6 +94,9 @@ private:
         QString id, name, nameLower, country;
         double lat = 0.0, lon = 0.0;
         QStringList configs;
+        // Confirmed S/F gate from the DB entry's "start" field, if present.
+        // Keys: "lat1", "lon1", "lat2", "lon2". Empty if the track has none.
+        QVariantMap confirmedFinishLine;
     };
 
     void loadDatabase();
@@ -103,6 +111,13 @@ private:
     // Emits applyFinishLine for the stored finish line of id, if any.
     // Returns true if a finish line was emitted.
     bool emitFinishLineFor(const QString &id);
+    // True if id has a confirmed finish line baked into the track DB entry
+    // itself (Track::confirmedFinishLine), rather than a user-learned one.
+    bool isFinishLineLocked(const QString &id) const;
+    // Effective gate for a track id: user-learned line first, else the confirmed
+    // DB gate, else empty ({}). No global ("") fallback — callers add it.
+    // Keys: "lat1", "lon1", "lat2", "lon2".
+    QVariantMap gateFor(const QString &id) const;
     static QString userStatePath();
     static QString dbOverridePath();
 

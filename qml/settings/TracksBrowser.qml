@@ -83,6 +83,11 @@ Item {
                 }
 
                 Rectangle {
+                    // Disabled for now: refreshing pulls the track list from
+                    // racebox.pro, which doesn't carry our own confirmed "start"
+                    // S/F lines (see data/track-db.json) and would silently drop
+                    // them from the local DB override until reinstalled.
+                    visible: false
                     Layout.preferredWidth: refreshLabel.width + 20
                     height: 30
                     color: refreshArea.pressed ? "#111122" : "transparent"
