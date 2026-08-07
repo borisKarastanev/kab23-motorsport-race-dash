@@ -1,12 +1,10 @@
 #include "mosquittocloudclient.h"
 #include "cloudconfig.h"
+#include "logging.h"
 
-#include <QLoggingCategory>
 #include <QMetaObject>
 
 #include <mosquitto.h>
-
-Q_LOGGING_CATEGORY(lcCloud, "dash.uplink.mqtt")
 
 namespace {
 
@@ -59,14 +57,9 @@ void MosquittoCloudClient::teardown(StopMode mode)
         return;
 
     if (m_loopRunning) {
-        // force=true is pthread_cancel on the network thread. That is the right
-        // trade at shutdown — without it this blocks until the thread finishes
-        // whatever it is doing, which on a dead LTE link is the full keepalive
-        // timeout, i.e. a 30 s hang in a car — but it is the wrong one on the
-        // re-pair path, where cancelling mid-OpenSSL-handshake can leave the
-        // library's own state inconsistent for the connect that follows
-        // immediately after. shutdownLink() asks for Graceful once it has sent a
-        // DISCONNECT over a live socket, where the thread returns promptly.
+        // force=true is pthread_cancel on the network thread. Which mode is safe
+        // here, and the hazard the Forced path still carries, is documented on
+        // StopMode in the header — read that before changing this line.
         mosquitto_loop_stop(m_mosq, mode == StopMode::Forced);
         m_loopRunning = false;
     }
@@ -82,9 +75,10 @@ void MosquittoCloudClient::shutdownLink()
     if (m_mosq)
         mosquitto_disconnect(m_mosq);
 
-    // Graceful only when there was a live socket to send the DISCONNECT on;
-    // otherwise the thread may be blocked in a connect or a handshake and a
+    // Graceful only when there was a live socket to send that DISCONNECT on;
+    // otherwise the thread may be blocked in a connect or a handshake, and a
     // non-forced stop would freeze the GUI thread for the keepalive interval.
+    // See StopMode in the header for what this split does and does not fix.
     teardown(wasConnected ? StopMode::Graceful : StopMode::Forced);
 
     // The whole reason this function exists. teardown() clears m_connected
@@ -133,40 +127,9 @@ void MosquittoCloudClient::connectToBroker()
     const QByteArray password = m_config->password().toUtf8();
     mosquitto_username_pw_set(m_mosq, username.constData(), password.constData());
 
-    if (m_config->useTls()) {
-        const QString caFile = m_config->caFile();
-        const QByteArray ca = caFile.toUtf8();
-
-        // Null CA path => use the system trust store, which is what a real
-        // Let's Encrypt certificate needs. A path is only for a private CA
-        // (the local rehearsal stack).
-        const int rc = mosquitto_tls_set(
-            m_mosq,
-            caFile.isEmpty() ? nullptr : ca.constData(),
-            caFile.isEmpty() ? "/etc/ssl/certs" : nullptr,
-            nullptr, nullptr, nullptr);
-
-        if (rc != MOSQ_ERR_SUCCESS) {
-            // Refuse, do not fall back. A downgrade to plaintext here would put
-            // the broker password on the air over LTE.
-            emit errorOccurred(tr("TLS setup failed: %1")
-                                   .arg(QString::fromUtf8(mosquitto_strerror(rc))));
-            teardown(StopMode::Forced);
-            return;
-        }
-
-        // Verify the peer certificate and that its name matches the host. This
-        // is libmosquitto's default, set explicitly because it is the entire
-        // security property being relied on and a future edit should have to
-        // delete a visible line to break it.
-        mosquitto_tls_opts_set(m_mosq, 1 /* SSL_VERIFY_PEER */, nullptr, nullptr);
-        mosquitto_tls_insecure_set(m_mosq, false);
-    } else {
-        // Loud, and on every connect rather than once: this is a development
-        // affordance for a local broker, and it must never be quietly true on a
-        // car that is publishing over the internet.
-        qCWarning(lcCloud) << "TLS is DISABLED — credential will cross the network "
-                              "in the clear. Development only.";
+    if (!configureTls()) {
+        teardown(StopMode::Forced);
+        return;
     }
 
     mosquitto_reconnect_delay_set(m_mosq, kReconnectDelayMin, kReconnectDelayMax,
@@ -194,6 +157,46 @@ void MosquittoCloudClient::connectToBroker()
     qCInfo(lcCloud) << "connecting to" << m_config->brokerHost()
                     << "port" << m_config->brokerPort()
                     << "tls" << m_config->useTls();
+}
+
+bool MosquittoCloudClient::configureTls()
+{
+    if (!m_config->useTls()) {
+        // Loud, and on every connect rather than once: this is a development
+        // affordance for a local broker, and it must never be quietly true on a
+        // car that is publishing over the internet.
+        qCWarning(lcCloud) << "TLS is DISABLED — credential will cross the network "
+                              "in the clear. Development only.";
+        return true;
+    }
+
+    const QString caFile = m_config->caFile();
+    const QByteArray ca = caFile.toUtf8();
+
+    // Null CA path => use the system trust store, which is what a real
+    // Let's Encrypt certificate needs. A path is only for a private CA
+    // (the local rehearsal stack).
+    const int rc = mosquitto_tls_set(
+        m_mosq,
+        caFile.isEmpty() ? nullptr : ca.constData(),
+        caFile.isEmpty() ? "/etc/ssl/certs" : nullptr,
+        nullptr, nullptr, nullptr);
+
+    if (rc != MOSQ_ERR_SUCCESS) {
+        // Refuse, do not fall back. A downgrade to plaintext here would put
+        // the broker password on the air over LTE.
+        emit errorOccurred(tr("TLS setup failed: %1")
+                               .arg(QString::fromUtf8(mosquitto_strerror(rc))));
+        return false;
+    }
+
+    // Verify the peer certificate and that its name matches the host. This
+    // is libmosquitto's default, set explicitly because it is the entire
+    // security property being relied on and a future edit should have to
+    // delete a visible line to break it.
+    mosquitto_tls_opts_set(m_mosq, 1 /* SSL_VERIFY_PEER */, nullptr, nullptr);
+    mosquitto_tls_insecure_set(m_mosq, false);
+    return true;
 }
 
 void MosquittoCloudClient::disconnectFromBroker()

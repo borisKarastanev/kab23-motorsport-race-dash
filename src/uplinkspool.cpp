@@ -1,14 +1,12 @@
 #include "uplinkspool.h"
 #include "apppaths.h"
+#include "logging.h"
 
 #include <QSqlError>
 #include <QSqlQuery>
 #include <QUuid>
 #include <QVariant>
-#include <QLoggingCategory>
 #include <algorithm>
-
-Q_LOGGING_CATEGORY(lcSpool, "dash.uplink.spool")
 
 UplinkSpool::UplinkSpool(QObject *parent)
     : QObject(parent)
@@ -218,24 +216,29 @@ QVector<SpooledFrame> UplinkSpool::peek(int limit)
 
 QVector<SpooledFrame> UplinkSpool::peekRun(int limit)
 {
-    const QVector<SpooledFrame> rows = peek(limit);
+    QVector<SpooledFrame> rows = peek(limit);
     if (rows.isEmpty())
         return rows;
 
     // Truncate at the first change of topic or sid. The next drain picks up
     // where this one stopped, so nothing is skipped — the batch is just split
     // at the boundary it has to be split at.
+    //
+    // In place, on the vector peek() already built. Copying the leading run into
+    // a second vector meant 200 SpooledFrame copies (and the refcount traffic on
+    // their QString/QByteArray members) per drain batch, on the GUI thread, to
+    // produce what is usually the same 200 rows: a batch straddles a boundary
+    // only twice per session.
     const QString topic = rows.first().topic;
     const QString sid   = rows.first().sid;
 
-    QVector<SpooledFrame> run;
-    run.reserve(rows.size());
-    for (const SpooledFrame &row : rows) {
-        if (row.topic != topic || row.sid != sid)
+    for (qsizetype i = 1; i < rows.size(); ++i) {
+        if (rows.at(i).topic != topic || rows.at(i).sid != sid) {
+            rows.resize(i);
             break;
-        run.append(row);
+        }
     }
-    return run;
+    return rows;
 }
 
 bool UplinkSpool::releaseThrough(qint64 lastId)

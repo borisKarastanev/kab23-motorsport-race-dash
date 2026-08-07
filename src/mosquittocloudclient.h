@@ -79,6 +79,40 @@ private:
     bool isStale(quint64 generation) const;
 
     // How mosquitto_loop_stop() is asked to end the network thread.
+    //
+    // ## KNOWN GAP — the Forced path can still cancel a TLS handshake
+    //
+    // `force=true` is pthread_cancel. Cancelling the network thread while it is
+    // inside OpenSSL can leave process-global library state inconsistent — a
+    // held lock, a leaked BIO — for the connect that follows. Destroying and
+    // recreating the mosquitto handle does not clear that, because the damage is
+    // not per-client.
+    //
+    // Graceful avoids it but is unbounded: mosquitto_loop_stop() without force
+    // waits for the thread to return, and a thread blocked on a dead LTE link
+    // does not return until the keepalive expires. That is a ~30 s frozen
+    // dashboard, on the GUI thread, in a moving car.
+    //
+    // So the policy is a split rather than a fix, and it leaves the risk exactly
+    // where it is worst:
+    //
+    //   - connected      -> Graceful. A DISCONNECT has just gone out over a live
+    //                       socket, so the thread returns promptly. This is the
+    //                       re-pair/UNPAIR path in practice, and it is no longer
+    //                       a cancel.
+    //   - not connected  -> Forced. Mid-handshake or mid-backoff against an
+    //                       unreachable host is precisely when cancelling is
+    //                       riskiest AND when Graceful would hang longest. The
+    //                       hang is the worse failure, so it is still cancelled.
+    //   - destructor     -> Forced, unconditionally. At process exit nothing
+    //                       follows the cancel, so the hazard does not apply.
+    //
+    // A real fix is asynchronous teardown: send the DISCONNECT, return to the
+    // event loop, and destroy the handle from the on_disconnect callback with a
+    // short QTimer as the bound. That is graceful in the common case and never
+    // blocks, but it needs connectToBroker() to tolerate a handle that is still
+    // retiring while a new one is built, so it was left out of the review fix
+    // that introduced this split.
     enum class StopMode {
         Graceful, // wait for the thread to return — only safe once a DISCONNECT
                   // has gone out over a live socket
@@ -89,6 +123,12 @@ private:
     // Sends a DISCONNECT, tears the handle down, and emits disconnected() if we
     // were connected. Everything that ends a live link goes through here.
     void shutdownLink();
+
+    // Applies the TLS settings (or the plaintext warning) to a freshly created
+    // handle. False means the connection must be refused — it has already
+    // emitted errorOccurred(); see the TLS note above for why there is no
+    // fallback.
+    bool configureTls();
 
     CloudConfig      *m_config = nullptr;
     struct mosquitto *m_mosq   = nullptr;

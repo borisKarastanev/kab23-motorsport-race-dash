@@ -22,7 +22,17 @@ public:
 
     // Asynchronous. `connected()` or `errorOccurred()` follows.
     virtual void connectToBroker() = 0;
+
+    // MUST emit `disconnected()` if the link was up, including when the
+    // disconnect is app-initiated and the transport's own callback never fires
+    // or fires too late to see it. This is a hard requirement, not a courtesy:
+    // UplinkModel::onClientDisconnected() is the only place its drain
+    // bookkeeping is reset, so a silent drop strands it mid-batch and every
+    // subsequent frame goes to the spool for the rest of the run while the UI
+    // still reports ONLINE. MosquittoCloudClient::shutdownLink() exists for
+    // exactly this, and MockCloudClient::dropLinkSilently() models the failure.
     virtual void disconnectFromBroker() = 0;
+
     virtual bool isConnected() const = 0;
 
     // Returns the message id, or -1 if the publish could not be handed to the

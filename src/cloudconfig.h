@@ -86,6 +86,11 @@ private:
     void load();
     void persist();
 
+    // Compare, assign, persist, notify — the body every setter above shares.
+    // Defined in the .cpp; every instantiation lives there too.
+    template <typename T>
+    void assign(T &field, const T &value);
+
     static QString configPath();
 
     QString m_brokerHost;

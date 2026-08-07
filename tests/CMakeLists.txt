@@ -120,6 +120,7 @@ set_tests_properties(tst_dashconfig PROPERTIES ENVIRONMENT "${DASH_TEST_ENV}")
 # an explicit path seam (setDatabasePath) for exactly this.
 add_executable(tst_uplinkspool cpp/tst_uplinkspool.cpp
     ${APP_SRC_DIR}/src/uplinkspool.cpp
+    ${APP_SRC_DIR}/src/logging.cpp
 )
 target_include_directories(tst_uplinkspool PRIVATE ${APP_SRC_DIR})
 target_link_libraries(tst_uplinkspool PRIVATE Qt6::Test Qt6::Sql)
@@ -154,6 +155,7 @@ set_tests_properties(tst_uplinkmodel PROPERTIES ENVIRONMENT "${DASH_TEST_ENV}")
 # real user's paired credential.
 add_executable(tst_cloudconfig cpp/tst_cloudconfig.cpp
     ${APP_SRC_DIR}/src/cloudconfig.cpp
+    ${APP_SRC_DIR}/src/logging.cpp
 )
 target_include_directories(tst_cloudconfig PRIVATE ${APP_SRC_DIR})
 target_link_libraries(tst_cloudconfig PRIVATE Qt6::Test)

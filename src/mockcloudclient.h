@@ -55,10 +55,10 @@ public:
             return -1;
         const int mid = ++m_nextMid;
         m_sent.append(Message{ topic, payload, qos, mid });
-        // QoS 0 is fire-and-forget and gets no PUBACK, matching the real broker
-        // — a test that waited for one would hang exactly as production would.
-        if (qos == 0)
-            return mid;
+        // An id is returned whatever the QoS, as the real client does. What
+        // differs is that nothing here ever emits published() on its own: a
+        // PUBACK arrives only when a test asks for one, so a test that waits for
+        // a QoS-0 acknowledgement hangs exactly as production would.
         return mid;
     }
 

@@ -53,7 +53,8 @@ public:
     Q_ENUM(State)
 
 private:
-    Q_PROPERTY(bool    enabled       READ enabled       NOTIFY stateChanged)
+    // No `enabled` property: QML reads the fact off CloudConfig, which owns it.
+    // Two bound names for one value is one of them going stale.
     Q_PROPERTY(State   state         READ state         NOTIFY stateChanged)
     Q_PROPERTY(QString stateText     READ stateText     NOTIFY stateChanged)
     Q_PROPERTY(QString deviceId      READ deviceId      NOTIFY stateChanged)
@@ -111,12 +112,16 @@ public slots:
     // pairing takes effect without a restart.
     void applyConfiguration();
 
-    // Discards the backlog and abandons any open session. Q_INVOKABLE because
-    // the UNPAIR confirmation in CloudUplinkDetail.qml calls it: that dialog
-    // promises the queued frames are discarded, and a backlog belonging to a car
-    // this dash is no longer provisioned for must not be published to whatever
-    // it is paired with next.
+    // Discards the backlog and abandons any open session. A backlog belonging to
+    // a car this dash is no longer provisioned for must not be published to
+    // whatever it is paired with next. Q_INVOKABLE for tests and for anything
+    // that needs the discard on its own; the UNPAIR dialog wants unpair().
     Q_INVOKABLE void clearSpool();
+
+    // Forgets the credential, switches the uplink off, discards the backlog and
+    // re-applies the configuration — in that order, which is why it is one call.
+    // Bound to the UNPAIR confirmation in CloudUplinkDetail.qml.
+    Q_INVOKABLE void unpair();
 
 signals:
     void stateChanged();
@@ -137,8 +142,14 @@ private:
     void beginSession();
     void endSession();
 
+    // Starts or stops the 10 Hz sampler from its inputs. Every path that changes
+    // one calls this rather than touching the timer.
+    void updateSampling();
+
     QByteArray buildFrame() const;
     QByteArray buildSessionEvent(const QString &event) const;
+    // The `{v, sid, frames[]}` backfill message for one drained batch.
+    QByteArray buildBackfillEnvelope(const QVector<SpooledFrame> &batch) const;
 
     void dispatch(const QString &topic, const QByteArray &payload, qint64 seq, int qos);
     void spool(const QString &topic, const QByteArray &payload, qint64 seq);
@@ -177,9 +188,20 @@ private:
     // Drain bookkeeping. One batch in flight at a time: the next starts on the
     // previous PUBACK, which keeps ordering trivial and stops a large backlog
     // from flooding a marginal link.
-    bool   m_draining      = false;
-    int    m_inFlightMid   = -1;
-    qint64 m_inFlightLastId = -1;
+    //
+    // Grouped rather than three loose members because they only ever have
+    // meaning together, and every path that abandons a drain has to clear all
+    // three. Spelling that out at five call sites is how one of them came to
+    // clear only `active` and leave the other two pointing at a batch that will
+    // never be acknowledged.
+    struct DrainState {
+        bool   active = false;
+        int    mid    = -1;   // in-flight publish; matched against published(mid)
+        qint64 lastId = -1;   // spool row the PUBACK releases through
+
+        void reset() { *this = DrainState{}; }
+    };
+    DrainState m_drain;
 
     // Throttled notify: during a drain this changes 200 at a time and must not
     // spam the QML engine, matching the repo's existing dirty-bit pattern.

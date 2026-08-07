@@ -1,5 +1,6 @@
 #include "cloudconfig.h"
 #include "apppaths.h"
+#include "logging.h"
 
 #include <QFile>
 #include <QSaveFile>
@@ -74,7 +75,7 @@ void CloudConfig::persist()
 
     QTemporaryDir staging;
     if (!staging.isValid()) {
-        qWarning("cloud.conf: could not create a private staging directory");
+        qCWarning(lcUplink) << "cloud.conf: could not create a private staging directory";
         return;
     }
     const QString scratch = staging.filePath(QStringLiteral("cloud.conf"));
@@ -94,7 +95,7 @@ void CloudConfig::persist()
 
     QFile in(scratch);
     if (!in.open(QIODevice::ReadOnly)) {
-        qWarning("cloud.conf: could not stage config for writing");
+        qCWarning(lcUplink) << "cloud.conf: could not stage config for writing";
         return;
     }
     const QByteArray bytes = in.readAll();
@@ -102,7 +103,7 @@ void CloudConfig::persist()
 
     QSaveFile out(path);
     if (!out.open(QIODevice::WriteOnly)) {
-        qWarning("cloud.conf: could not open for writing");
+        qCWarning(lcUplink) << "cloud.conf: could not open for writing";
         return;
     }
     // Set before commit(): QSaveFile writes through a temporary, so permissions
@@ -110,75 +111,48 @@ void CloudConfig::persist()
     out.setPermissions(QFileDevice::ReadOwner | QFileDevice::WriteOwner);
     out.write(bytes);
     if (!out.commit())
-        qWarning("cloud.conf: write failed");
+        qCWarning(lcUplink) << "cloud.conf: write failed";
 }
 
-void CloudConfig::setBrokerHost(const QString &host)
+// Every setter is the same three steps, and getting one of them wrong is silent:
+// a field that assigns without persist() survives until the next restart and
+// then reverts, which on the credential means a car that unpairs itself
+// overnight. One helper means a future eighth field cannot forget.
+template <typename T>
+void CloudConfig::assign(T &field, const T &value)
 {
-    if (m_brokerHost == host)
+    if (field == value)
         return;
-    m_brokerHost = host;
+    field = value;
     persist();
     emit changed();
 }
+
+void CloudConfig::setBrokerHost(const QString &host) { assign(m_brokerHost, host); }
 
 void CloudConfig::setBrokerPort(int port)
 {
-    if (m_brokerPort == port || port <= 0 || port > 65535)
+    if (port <= 0 || port > 65535)
         return;
-    m_brokerPort = port;
-    persist();
-    emit changed();
+    assign(m_brokerPort, port);
 }
 
-void CloudConfig::setDeviceId(const QString &id)
-{
-    if (m_deviceId == id)
-        return;
-    m_deviceId = id;
-    persist();
-    emit changed();
-}
+void CloudConfig::setDeviceId(const QString &id) { assign(m_deviceId, id); }
 
 void CloudConfig::setUseTls(bool on)
 {
-    if (m_useTls == on)
-        return;
     // Not blocked — a developer bench-testing against a local broker on 1883
     // needs it — but it is never the default, and MosquittoCloudClient warns on
     // every connect while it is off. See the plan: "a password over plaintext
     // MQTT across LTE is a leaked credential".
-    m_useTls = on;
-    persist();
-    emit changed();
+    assign(m_useTls, on);
 }
 
-void CloudConfig::setCaFile(const QString &path)
-{
-    if (m_caFile == path)
-        return;
-    m_caFile = path;
-    persist();
-    emit changed();
-}
+void CloudConfig::setCaFile(const QString &path) { assign(m_caFile, path); }
 
-void CloudConfig::setEnabled(bool on)
-{
-    if (m_enabled == on)
-        return;
-    m_enabled = on;
-    persist();
-    emit changed();
-}
+void CloudConfig::setEnabled(bool on) { assign(m_enabled, on); }
 
-void CloudConfig::setPassword(const QString &password)
-{
-    if (m_password == password)
-        return;
-    m_password = password;
-    persist();
-    emit changed();
-}
+void CloudConfig::setPassword(const QString &password) { assign(m_password, password); }
 
 void CloudConfig::clearPassword()
 {

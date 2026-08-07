@@ -22,62 +22,12 @@ Item {
             width: flick.width
 
             // ── Wi-Fi enable/disable toggle ──────────────────────
-            Rectangle {
+            ToggleRow {
                 width: parent.width
-                height: 60
-                color: "#0d0d0d"
-
-                Text {
-                    anchors.left: parent.left
-                    anchors.leftMargin: 16
-                    anchors.verticalCenter: parent.verticalCenter
-                    text: "WI-FI"
-                    color: "#cccccc"
-                    font.pixelSize: 12
-                    font.bold: true
-                    font.family: "monospace"
-                    font.letterSpacing: 2
-                }
-
-                Rectangle {
-                    id: toggleTrack
-                    anchors.right: parent.right
-                    anchors.rightMargin: 16
-                    anchors.verticalCenter: parent.verticalCenter
-                    width: 46
-                    height: 24
-                    radius: 12
-                    opacity: networkModel.busy ? 0.5 : 1.0
-                    color: networkModel.wifiEnabled ? "#00cc44" : "#2a2a2a"
-                    border.color: "#1a1a1a"
-                    border.width: 1
-
-                    Rectangle {
-                        width: 18
-                        height: 18
-                        radius: 9
-                        anchors.verticalCenter: parent.verticalCenter
-                        color: "#0d0d0d"
-                        x: networkModel.wifiEnabled ? (parent.width - width - 3) : 3
-                        Behavior on x { NumberAnimation { duration: 150 } }
-                    }
-
-                    MouseArea {
-                        anchors.fill: parent
-                        enabled: !networkModel.busy
-                        onClicked: networkModel.setWifiEnabled(!networkModel.wifiEnabled)
-                    }
-                }
-
-                Rectangle {
-                    anchors.bottom: parent.bottom
-                    anchors.left: parent.left
-                    anchors.right: parent.right
-                    anchors.leftMargin: 16
-                    anchors.rightMargin: 16
-                    height: 1
-                    color: "#1a1a1a"
-                }
+                label: "WI-FI"
+                checked: networkModel.wifiEnabled
+                busy: networkModel.busy
+                onToggled: networkModel.setWifiEnabled(!networkModel.wifiEnabled)
             }
 
             // ── NetworkManager unavailable notice ────────────────

@@ -3,6 +3,7 @@
 #include "candatamodel.h"
 #include "cloudconfig.h"
 #include "icloudclient.h"
+#include "logging.h"
 #include "raceboxmodel.h"
 #include "trackmodel.h"
 
@@ -10,11 +11,8 @@
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
-#include <QLoggingCategory>
 #include <QUuid>
 #include <algorithm>
-
-Q_LOGGING_CATEGORY(lcUplink, "dash.uplink")
 
 namespace {
 
@@ -25,6 +23,16 @@ constexpr int kWireVersion = 1;
 constexpr int kQosTelemetry = 0; // fire-and-forget: a lost live frame is stale anyway
 constexpr int kQosSession   = 1; // lifecycle must arrive
 constexpr int kQosBackfill  = 1; // the PUBACK is what releases spool rows
+
+// One JSON string literal, escaped by Qt rather than by hand. QJsonDocument has
+// no entry point for a bare value, so it goes through a one-element array and
+// the brackets come back off — one small allocation per backfill batch, and the
+// escaping rules stay Qt's.
+QByteArray jsonString(const QString &value)
+{
+    const QByteArray array = QJsonDocument(QJsonArray{ value }).toJson(QJsonDocument::Compact);
+    return array.mid(1, array.size() - 2);
+}
 
 } // namespace
 
@@ -46,7 +54,11 @@ UplinkModel::UplinkModel(CanDataModel *can,
     m_mono.start();
 
     m_sampleTimer.setInterval(kSampleIntervalMs);
-    m_sampleTimer.setTimerType(Qt::PreciseTimer);
+    // Coarse, not Precise: every frame carries its own `ts` and `mono`, so the
+    // cloud reads the time the sample was taken rather than assuming a perfect
+    // 100 ms grid. A precise timer opts out of the kernel's timer coalescing for
+    // no gain, and this one fires for the whole length of a stint.
+    m_sampleTimer.setTimerType(Qt::CoarseTimer);
     connect(&m_sampleTimer, &QTimer::timeout, this, &UplinkModel::onSampleTick);
 
     m_queuedNotifyTimer.setInterval(kQueuedNotifyMs);
@@ -127,10 +139,30 @@ void UplinkModel::start()
     applyConfiguration();
 }
 
+// The one place that decides whether the 10 Hz sampler runs, so that every path
+// which changes one of its inputs — enable, pair, session open, session close,
+// unpair, shutdown — just says so and gets the same answer.
+//
+// Previously the timer was started on enable and stopped only on disable, and
+// onSampleTick() early-returned when no session was open. That is ten wakeups a
+// second, on the GUI event loop, for as long as a paired dash sits in the
+// paddock, to do nothing.
+void UplinkModel::updateSampling()
+{
+    const bool wanted = m_started && m_sessionActive && enabled()
+                        && m_config && m_config->configured();
+    if (wanted == m_sampleTimer.isActive())
+        return;
+    if (wanted)
+        m_sampleTimer.start();
+    else
+        m_sampleTimer.stop();
+}
+
 void UplinkModel::applyConfiguration()
 {
     if (!enabled()) {
-        m_sampleTimer.stop();
+        updateSampling();
         if (m_client)
             m_client->disconnectFromBroker();
         setState(Disabled);
@@ -155,14 +187,14 @@ void UplinkModel::applyConfiguration()
     refreshQueuedFrames();
 
     if (!m_config->configured()) {
-        m_sampleTimer.stop();
+        updateSampling();
         setState(Unconfigured);
         return;
     }
 
     setLastError(QString());
     setState(Connecting);
-    m_sampleTimer.start();
+    updateSampling();
     if (m_client)
         m_client->connectToBroker();
 }
@@ -191,7 +223,7 @@ void UplinkModel::shutdown()
         emit sessionActiveChanged();
     }
 
-    m_sampleTimer.stop();
+    updateSampling();
     if (m_client)
         m_client->disconnectFromBroker();
 }
@@ -203,9 +235,7 @@ void UplinkModel::clearSpool()
     // sessions under another car's topics and credential — which is what the
     // UNPAIR dialog has always promised does not happen, while nothing in
     // production actually called UplinkSpool::clear().
-    m_draining       = false;
-    m_inFlightMid    = -1;
-    m_inFlightLastId = -1;
+    m_drain.reset();
 
     m_spool.clear();
     refreshQueuedFrames();
@@ -216,6 +246,7 @@ void UplinkModel::clearSpool()
     if (m_sessionActive) {
         m_sessionActive = false;
         emit sessionActiveChanged();
+        updateSampling();
     }
     m_sid.clear();
     m_seq = 0;
@@ -223,6 +254,25 @@ void UplinkModel::clearSpool()
     m_topSpeedKmh = 0;
 
     qCInfo(lcUplink) << "spool cleared — device unpaired";
+}
+
+void UplinkModel::unpair()
+{
+    if (!m_config)
+        return;
+
+    // The order matters and is the whole reason this is one operation rather
+    // than four calls from the confirmation dialog: the backlog has to go while
+    // the link is still the old car's, and only then may the configuration be
+    // re-applied. Spelled out at the call site, the next entry point that
+    // un-pairs (a provisioning flow, a QR re-pair) gets to omit a step — which
+    // is how UNPAIR came to promise it discarded queued frames while nothing
+    // called UplinkSpool::clear(), and re-pairing as a different car replayed
+    // the previous car's sessions under the new car's topics and credential.
+    m_config->clearPassword();
+    m_config->setEnabled(false);
+    clearSpool();
+    applyConfiguration();
 }
 
 // --- session lifecycle -------------------------------------------------------
@@ -287,6 +337,7 @@ void UplinkModel::beginSession()
     m_topSpeedKmh = 0;
     m_sessionActive = true;
     emit sessionActiveChanged();
+    updateSampling();
 
     qCInfo(lcUplink) << "session start" << m_sid;
     dispatch(sessionTopic(), buildSessionEvent(QStringLiteral("start")), 0, kQosSession);
@@ -299,6 +350,7 @@ void UplinkModel::endSession()
 
     m_sessionActive = false;
     emit sessionActiveChanged();
+    updateSampling();
     // m_sid deliberately survives: a backlog still in the spool belongs to it,
     // and the drain re-reads the sid from each row anyway.
 }
@@ -381,6 +433,38 @@ QByteArray UplinkModel::buildSessionEvent(const QString &event) const
     return QJsonDocument(payload).toJson(QJsonDocument::Compact);
 }
 
+QByteArray UplinkModel::buildBackfillEnvelope(const QVector<SpooledFrame> &batch) const
+{
+    // Concatenated, not re-parsed. Every spooled row already holds exactly the
+    // compact JSON object buildFrame() produced, so round-tripping 200 of them
+    // through QJsonDocument::fromJson() only to re-serialise the same bytes is
+    // pure work — and it happens on the GUI thread, once per batch, back to back
+    // for the whole length of a backlog. That is precisely when the dashboard is
+    // expected to stay smooth: the driver is out on track and the uplink is
+    // catching up behind them.
+    //
+    // Key order differs from what QJsonDocument would emit (it sorts). The wire
+    // contract is a JSON object; order is not part of it.
+    qsizetype bytes = 0;
+    for (const SpooledFrame &row : batch)
+        bytes += row.payload.size() + 1;
+
+    QByteArray out;
+    out.reserve(bytes + 64);
+    out += "{\"v\":";
+    out += QByteArray::number(kWireVersion);
+    out += ",\"sid\":";
+    out += jsonString(batch.first().sid);
+    out += ",\"frames\":[";
+    for (qsizetype i = 0; i < batch.size(); ++i) {
+        if (i > 0)
+            out += ',';
+        out += batch.at(i).payload;
+    }
+    out += "]}";
+    return out;
+}
+
 // --- dispatch: live or spool -------------------------------------------------
 
 void UplinkModel::dispatch(const QString &topic, const QByteArray &payload,
@@ -389,7 +473,7 @@ void UplinkModel::dispatch(const QString &topic, const QByteArray &payload,
     // While draining, everything goes to the spool even though the link is up.
     // That is the point: the cloud must see the backlog before the present, or
     // a viewer's map would jump forward and then rewind.
-    const bool live = m_client && m_client->isConnected() && !m_draining;
+    const bool live = m_client && m_client->isConnected() && !m_drain.active;
 
     if (!live) {
         spool(topic, payload, seq);
@@ -418,19 +502,17 @@ void UplinkModel::onClientConnected()
     setState(Online);
     setLastError(QString());
 
-    // Assigned unconditionally, never only set. m_draining diverts *everything*
-    // to the spool (see dispatch()), so a stale true is not a missed
-    // optimisation — it is an uplink that reports ONLINE while every frame goes
-    // to the SD card and nothing ever drains it. That state was reachable: a
-    // batch in flight when the link went down could release its rows on a queued
-    // PUBACK, leaving the spool empty and m_draining true, and the old
-    // `if (count() > 0)` then declined to restart the drain that would have
-    // cleared the flag.
-    m_draining = m_spool.count() > 0;
-    m_inFlightMid    = -1;
-    m_inFlightLastId = -1;
+    // Assigned unconditionally, never only set. `active` diverts *everything* to
+    // the spool (see dispatch()), so a stale true is not a missed optimisation —
+    // it is an uplink that reports ONLINE while every frame goes to the SD card
+    // and nothing ever drains it. That state was reachable: a batch in flight
+    // when the link went down could release its rows on a queued PUBACK, leaving
+    // the spool empty and `active` true, and the old `if (count() > 0)` then
+    // declined to restart the drain that would have cleared the flag.
+    m_drain.reset();
+    m_drain.active = m_spool.count() > 0;
 
-    if (m_draining)
+    if (m_drain.active)
         drainNext();
 }
 
@@ -438,9 +520,7 @@ void UplinkModel::onClientDisconnected()
 {
     // Not an error state: a dropout at a track is normal, and libmosquitto is
     // already retrying with backoff. Frames go to the spool meanwhile.
-    m_draining = false;
-    m_inFlightMid = -1;
-    m_inFlightLastId = -1;
+    m_drain.reset();
 
     // Only a link that was Online degrades to Offline. Reconfiguring while
     // connected also arrives here — applyConfiguration() sets Connecting and
@@ -460,15 +540,13 @@ void UplinkModel::onClientError(const QString &message)
 
 void UplinkModel::drainNext()
 {
-    if (!m_draining || !m_client || !m_client->isConnected())
+    if (!m_drain.active || !m_client || !m_client->isConnected())
         return;
 
     const QVector<SpooledFrame> batch = m_spool.peekRun();
     if (batch.isEmpty()) {
         // Caught up. Live publishing resumes on the next sample tick.
-        m_draining = false;
-        m_inFlightMid = -1;
-        m_inFlightLastId = -1;
+        m_drain.reset();
         refreshQueuedFrames();
         qCInfo(lcUplink) << "backlog drained";
         return;
@@ -481,17 +559,7 @@ void UplinkModel::drainNext()
         // Telemetry replays on the dedicated backfill topic, batched. The cloud
         // deliberately does NOT publish backfill to its live bus — a drained
         // backlog arriving on the live channel would rewind every viewer's map.
-        QJsonArray frames;
-        for (const SpooledFrame &row : batch)
-            frames.append(QJsonDocument::fromJson(row.payload).object());
-
-        QJsonObject envelope;
-        envelope["v"]      = kWireVersion;
-        envelope["sid"]    = batch.first().sid;
-        envelope["frames"] = frames;
-
-        mid = m_client->publish(backfillTopic(),
-                                QJsonDocument(envelope).toJson(QJsonDocument::Compact),
+        mid = m_client->publish(backfillTopic(), buildBackfillEnvelope(batch),
                                 kQosBackfill);
     } else {
         // Session events replay one at a time on their own topic, unbatched —
@@ -501,23 +569,23 @@ void UplinkModel::drainNext()
     }
 
     if (mid < 0) {
-        m_draining = false;
+        m_drain.reset();
         return;
     }
 
-    m_inFlightMid    = mid;
+    m_drain.mid    = mid;
     // Rows are released only when this id is acknowledged — never here. A power
     // cut between publish and PUBACK therefore re-sends, which the cloud's
     // (session, seq, time) dedup index makes free.
-    m_inFlightLastId = isTelemetry ? batch.last().id : batch.first().id;
+    m_drain.lastId = isTelemetry ? batch.last().id : batch.first().id;
 }
 
 void UplinkModel::onClientPublished(int mid)
 {
-    if (!m_draining || mid != m_inFlightMid)
+    if (!m_drain.active || mid != m_drain.mid)
         return;
 
-    m_spool.releaseThrough(m_inFlightLastId);
+    m_spool.releaseThrough(m_drain.lastId);
     refreshQueuedFrames();
     drainNext();
 }

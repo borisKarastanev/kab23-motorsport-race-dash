@@ -20,10 +20,59 @@ Item {
     // show up at runtime.
     readonly property int uplinkState: uplinkModel.state
 
-    // One size for every action button, so the left and right columns line up
-    // with each other rather than each sizing to its own label.
-    readonly property int actionWidth: 150
-    readonly property int actionHeight: 40
+    // A pair of edge-pinned action buttons.
+    //
+    // Pinned to the container edges rather than two half-width buttons: the gap
+    // takes the slack, so each button keeps a fixed size and the pair stays
+    // aligned whatever the row contains — including when UNPAIR is hidden on an
+    // unpaired device and its row would otherwise stretch SET CREDENTIAL across
+    // the full width. One component so that alignment is structural rather than
+    // a convention each row has to re-honour.
+    //
+    // Declared inside the root object, not beside it: a sibling `component`
+    // declaration is a syntax error QML reports only at load time, which on this
+    // dev machine means the app exits silently. See CLAUDE.md.
+    component ActionRow: Item {
+        id: actionRow
+
+        // One size for every button on the page, so the two rows line up with
+        // each other rather than each button sizing to its own label.
+        readonly property int buttonWidth: 150
+        readonly property int buttonHeight: 40
+
+        property string leftText: ""
+        property string rightText: ""
+        property bool   rightVisible: true
+        property color  rightColor: "#cccccc"
+
+        signal leftClicked()
+        signal rightClicked()
+
+        Layout.fillWidth: true
+        Layout.preferredHeight: actionRow.buttonHeight
+        Layout.leftMargin: 20
+        Layout.rightMargin: 20
+
+        TextButton {
+            anchors.left: parent.left
+            anchors.verticalCenter: parent.verticalCenter
+            width: actionRow.buttonWidth
+            height: actionRow.buttonHeight
+            text: actionRow.leftText
+            onClicked: actionRow.leftClicked()
+        }
+
+        TextButton {
+            anchors.right: parent.right
+            anchors.verticalCenter: parent.verticalCenter
+            width: actionRow.buttonWidth
+            height: actionRow.buttonHeight
+            visible: actionRow.rightVisible
+            text: actionRow.rightText
+            textColor: actionRow.rightColor
+            onClicked: actionRow.rightClicked()
+        }
+    }
 
     function stateColor(s) {
         switch (s) {
@@ -83,25 +132,22 @@ Item {
                 }
             }
 
-            StatRow { Layout.fillWidth: true; label: "BROKER";    value: uplinkModel.brokerSummary }
+            // StatRow sets Layout.fillWidth itself; nothing to restate here.
+            StatRow { label: "BROKER"; value: uplinkModel.brokerSummary }
             StatRow {
-                Layout.fillWidth: true
                 label: "DEVICE ID"
                 value: uplinkModel.deviceId === "" ? "NOT SET" : uplinkModel.deviceId
             }
             StatRow {
-                Layout.fillWidth: true
                 label: "CREDENTIAL"
                 // Whether one exists, never what it is.
                 value: cloudConfig.hasPassword ? "STORED" : "NOT SET"
             }
             StatRow {
-                Layout.fillWidth: true
                 label: "SESSION"
                 value: uplinkModel.sessionActive ? "ACTIVE" : "IDLE"
             }
             StatRow {
-                Layout.fillWidth: true
                 label: "QUEUED FRAMES"
                 // Non-zero means the link is down and data is being held for replay
                 // — the number a driver actually wants when the uplink looks unwell.
@@ -109,7 +155,6 @@ Item {
             }
 
             StatRow {
-                Layout.fillWidth: true
                 visible: uplinkModel.lastError !== ""
                 label: "LAST ERROR"
                 value: uplinkModel.lastError
@@ -118,136 +163,40 @@ Item {
             Item { Layout.fillWidth: true; Layout.preferredHeight: 16 }
 
             // ── enable toggle ─────────────────────────────────────
-            // Same control as Settings > Network Connection > Wi-Fi, deliberately:
-            // both answer "is this radio on", and a switch reads as current state at
-            // a glance where a button labelled with the *opposite* action ("DISABLE
-            // UPLINK" when enabled) has to be decoded first — which is the wrong
-            // demand to make of somebody glancing at a screen in a pit lane.
-            Rectangle {
-                Layout.fillWidth: true
-                Layout.preferredHeight: 60
-                color: "#0d0d0d"
-
-                Text {
-                    anchors.left: parent.left
-                    anchors.leftMargin: 20
-                    anchors.verticalCenter: parent.verticalCenter
-                    text: "CLOUD UPLINK"
-                    color: "#cccccc"
-                    font.pixelSize: 12
-                    font.bold: true
-                    font.family: "monospace"
-                    font.letterSpacing: 2
-                }
-
-                Rectangle {
-                    id: enableTrack
-                    anchors.right: parent.right
-                    anchors.rightMargin: 20
-                    anchors.verticalCenter: parent.verticalCenter
-                    width: 46
-                    height: 24
-                    radius: 12
-                    color: cloudConfig.enabled ? "#00cc44" : "#2a2a2a"
-                    border.color: "#1a1a1a"
-                    border.width: 1
-
-                    Rectangle {
-                        width: 18
-                        height: 18
-                        radius: 9
-                        anchors.verticalCenter: parent.verticalCenter
-                        color: "#0d0d0d"
-                        x: cloudConfig.enabled ? (parent.width - width - 3) : 3
-                        Behavior on x { NumberAnimation { duration: 150 } }
-                    }
-
-                    MouseArea {
-                        anchors.fill: parent
-                        onClicked: {
-                            cloudConfig.enabled = !cloudConfig.enabled
-                            uplinkModel.applyConfiguration()
-                        }
-                    }
-                }
-
-                Rectangle {
-                    anchors.bottom: parent.bottom
-                    anchors.left: parent.left
-                    anchors.right: parent.right
-                    anchors.leftMargin: 20
-                    anchors.rightMargin: 20
-                    height: 1
-                    color: "#1a1a1a"
+            ToggleRow {
+                label: "CLOUD UPLINK"
+                checked: cloudConfig.enabled
+                onToggled: {
+                    cloudConfig.enabled = !cloudConfig.enabled
+                    uplinkModel.applyConfiguration()
                 }
             }
 
             Item { Layout.fillWidth: true; Layout.preferredHeight: 12 }
 
             // ── pairing ───────────────────────────────────────────
-            // Two columns pinned to the container edges rather than two half-width
-            // buttons: the spacer takes the slack, so each button keeps a fixed size
-            // and the pair stays aligned whatever the row contains — including when
-            // UNPAIR is hidden on an unpaired device and its row would otherwise
-            // stretch SET CREDENTIAL across the full width.
-            Item {
-                Layout.fillWidth: true
-                Layout.preferredHeight: root.actionHeight
-                Layout.leftMargin: 20
-                Layout.rightMargin: 20
-
-                TextButton {
-                    anchors.left: parent.left
-                    anchors.verticalCenter: parent.verticalCenter
-                    width: root.actionWidth
-                    height: root.actionHeight
-                    text: "SET BROKER"
-                    onClicked: {
-                        hostEntry.seed = cloudConfig.brokerHost
-                        hostEntry.visible = true
-                    }
+            ActionRow {
+                leftText: "SET BROKER"
+                onLeftClicked: {
+                    hostEntry.seed = cloudConfig.brokerHost
+                    hostEntry.visible = true
                 }
-
-                TextButton {
-                    anchors.right: parent.right
-                    anchors.verticalCenter: parent.verticalCenter
-                    width: root.actionWidth
-                    height: root.actionHeight
-                    text: "SET DEVICE ID"
-                    onClicked: {
-                        deviceEntry.seed = cloudConfig.deviceId
-                        deviceEntry.visible = true
-                    }
+                rightText: "SET DEVICE ID"
+                onRightClicked: {
+                    deviceEntry.seed = cloudConfig.deviceId
+                    deviceEntry.visible = true
                 }
             }
 
             Item { Layout.fillWidth: true; Layout.preferredHeight: 8 }
 
-            Item {
-                Layout.fillWidth: true
-                Layout.preferredHeight: root.actionHeight
-                Layout.leftMargin: 20
-                Layout.rightMargin: 20
-
-                TextButton {
-                    anchors.left: parent.left
-                    anchors.verticalCenter: parent.verticalCenter
-                    width: root.actionWidth
-                    height: root.actionHeight
-                    text: "SET CREDENTIAL"
-                    onClicked: credentialEntry.visible = true
-                }
-
-                TextButton {
-                    anchors.right: parent.right
-                    anchors.verticalCenter: parent.verticalCenter
-                    width: root.actionWidth
-                    height: root.actionHeight
-                    visible: cloudConfig.hasPassword
-                    text: "UNPAIR"
-                    textColor: "#cc4444"
-                    onClicked: unpairConfirm.visible = true
-                }
+            ActionRow {
+                leftText: "SET CREDENTIAL"
+                onLeftClicked: credentialEntry.visible = true
+                rightText: "UNPAIR"
+                rightColor: "#cc4444"
+                rightVisible: cloudConfig.hasPassword
+                onRightClicked: unpairConfirm.visible = true
             }
 
             Text {
@@ -322,15 +271,12 @@ Item {
         title: "UNPAIR THIS CAR?"
         message: "Forgets the broker credential and discards any queued frames. "
                  + "The credential cannot be recovered — a new one must be issued."
+        // One call, not the four steps this used to spell out: the order between
+        // forgetting the credential, discarding the backlog and re-applying the
+        // configuration is load-bearing, and it belongs with the model that
+        // knows why. See UplinkModel::unpair().
         onConfirmed: {
-            cloudConfig.clearPassword()
-            cloudConfig.enabled = false
-            // Before applyConfiguration(), so the backlog is gone while the link
-            // is still the old car's. The message above promises this; without
-            // the call, re-pairing as a different car replayed the previous
-            // car's sessions under the new car's topics and credential.
-            uplinkModel.clearSpool()
-            uplinkModel.applyConfiguration()
+            uplinkModel.unpair()
             unpairConfirm.visible = false
         }
         onCancelled: unpairConfirm.visible = false
