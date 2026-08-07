@@ -22,8 +22,26 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_AUTOMOC ON)
 set(CMAKE_AUTORCC ON)
 
-find_package(Qt6 REQUIRED COMPONENTS Core Quick SerialBus Network)
+find_package(Qt6 REQUIRED COMPONENTS Core Quick SerialBus Network Sql)
 find_package(Qt6 OPTIONAL_COMPONENTS Bluetooth)
+
+# Cloud uplink (Phase 2). Both are hard requirements, not OPTIONAL_COMPONENTS
+# like Bluetooth: there is no useful degraded mode for an uplink that cannot
+# connect (libmosquitto) or cannot spool while offline (Qt6::Sql). Half a
+# working uplink silently drops a session, which is worse than refusing to
+# start.
+#
+# libmosquitto rather than QtMqtt because QtMqtt is packaged in no Debian suite
+# — Pi OS Bookworm has no qt6-mqtt-dev — so it would mean install.sh building a
+# Qt module from source on every fresh install. libmosquitto-dev is one apt line
+# (bookworm ships 2.0.11); mosquitto-devel on the Fedora dev box.
+#
+# NB Qt6::Sql headers are not enough at runtime: Pi OS packages the SQLite
+# driver plugin separately as libqt6sql6-sqlite, and without it addDatabase
+# ("QSQLITE") fails at runtime rather than at build time. install.sh installs
+# both.
+find_package(PkgConfig REQUIRED)
+pkg_check_modules(MOSQUITTO REQUIRED IMPORTED_TARGET libmosquitto)
 
 qt_add_resources(RESOURCES resources.qrc)
 
@@ -49,6 +67,11 @@ add_executable(bmw-e46-dash
     src/updatemodel.cpp
     src/networkmodel.cpp
     src/sdnotify.cpp
+    src/icloudclient.h
+    src/cloudconfig.cpp
+    src/uplinkspool.cpp
+    src/mosquittocloudclient.cpp
+    src/uplinkmodel.cpp
     ${RESOURCES}
 )
 
@@ -69,6 +92,8 @@ target_link_libraries(bmw-e46-dash
     Qt6::Quick
     Qt6::SerialBus
     Qt6::Network
+    Qt6::Sql
+    PkgConfig::MOSQUITTO
 )
 
 if(Qt6Bluetooth_FOUND)
