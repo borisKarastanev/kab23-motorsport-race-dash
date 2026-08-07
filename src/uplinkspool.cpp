@@ -6,6 +6,7 @@
 #include <QUuid>
 #include <QVariant>
 #include <QLoggingCategory>
+#include <algorithm>
 
 Q_LOGGING_CATEGORY(lcSpool, "dash.uplink.spool")
 
@@ -21,22 +22,36 @@ UplinkSpool::UplinkSpool(QObject *parent)
 
 UplinkSpool::~UplinkSpool()
 {
+    abandonConnection();
+}
+
+void UplinkSpool::abandonConnection()
+{
     if (m_db.isOpen())
         m_db.close();
+    // The QSqlDatabase copy must be released before removeDatabase(), or Qt
+    // warns "connection is still in use, all queries will cease to work".
     m_db = QSqlDatabase();
     if (QSqlDatabase::contains(m_connectionName))
         QSqlDatabase::removeDatabase(m_connectionName);
+    m_open = false;
+    m_rowCount = 0;
 }
 
 void UplinkSpool::setDatabasePath(const QString &path)
 {
     m_path = path;
+    m_openFailed = false;
 }
 
 bool UplinkSpool::open()
 {
     if (m_open)
         return true;
+    // Latched: see the header. Retrying a permanent failure at 10 Hz is a log
+    // flood and continuous SD-card writes, not a recovery.
+    if (m_openFailed)
+        return false;
 
     if (m_path.isEmpty())
         m_path = AppPaths::dataFile(QStringLiteral("uplink-spool.sqlite"));
@@ -50,7 +65,10 @@ bool UplinkSpool::open()
         // headers, so a machine that builds fine can still fail here at runtime.
         qCWarning(lcSpool) << "could not open spool at" << m_path
                            << "-" << m_db.lastError().text()
-                           << "(drivers:" << QSqlDatabase::drivers() << ')';
+                           << "(drivers:" << QSqlDatabase::drivers() << ')'
+                           << "— spooling is disabled for this run";
+        m_openFailed = true;
+        abandonConnection();
         return false;
     }
 
@@ -64,12 +82,26 @@ bool UplinkSpool::open()
     // batch of frames the cloud will accept again on re-send anyway.
     pragma.exec(QStringLiteral("PRAGMA synchronous = NORMAL"));
 
-    if (!ensureSchema())
+    if (!ensureSchema()) {
+        m_openFailed = true;
+        abandonConnection();
         return false;
+    }
 
     m_open = true;
-    qCInfo(lcSpool) << "spool ready at" << m_path << "rows:" << count();
+    // The only COUNT(*) in this class. Everything after this maintains the
+    // counter incrementally — see count().
+    m_rowCount = countFromDb();
+    qCInfo(lcSpool) << "spool ready at" << m_path << "rows:" << m_rowCount;
     return true;
+}
+
+int UplinkSpool::countFromDb()
+{
+    QSqlQuery q(m_db);
+    if (!q.exec(QStringLiteral("SELECT COUNT(*) FROM frames")) || !q.next())
+        return 0;
+    return q.value(0).toInt();
 }
 
 bool UplinkSpool::ensureSchema()
@@ -127,17 +159,17 @@ bool UplinkSpool::append(const QVector<SpooledFrame> &frames)
         return false;
     }
 
+    m_rowCount += frames.size();
     evictOverflow();
     return true;
 }
 
 void UplinkSpool::evictOverflow()
 {
-    const int rows = count();
-    if (rows <= kMaxRows)
+    if (m_rowCount <= kMaxRows)
         return;
 
-    const int excess = rows - kMaxRows;
+    const int excess = m_rowCount - kMaxRows;
     QSqlQuery q(m_db);
     // Oldest first — ascending id. Deliberately not "newest first": the driver
     // is looking for the last stint, not the first.
@@ -149,6 +181,10 @@ void UplinkSpool::evictOverflow()
         qCWarning(lcSpool) << "eviction failed:" << q.lastError().text();
         return;
     }
+    // numRowsAffected() rather than `excess`: the counter must track what the
+    // database actually did, otherwise a partial delete leaves it drifting and
+    // every later eviction is sized off a wrong number.
+    m_rowCount -= std::max(0, q.numRowsAffected());
     qCWarning(lcSpool) << "spool full — evicted" << excess << "oldest frames";
 }
 
@@ -214,18 +250,8 @@ bool UplinkSpool::releaseThrough(qint64 lastId)
         qCWarning(lcSpool) << "release failed:" << q.lastError().text();
         return false;
     }
+    m_rowCount -= std::max(0, q.numRowsAffected());
     return true;
-}
-
-int UplinkSpool::count()
-{
-    if (!m_db.isOpen())
-        return 0;
-
-    QSqlQuery q(m_db);
-    if (!q.exec(QStringLiteral("SELECT COUNT(*) FROM frames")) || !q.next())
-        return 0;
-    return q.value(0).toInt();
 }
 
 bool UplinkSpool::clear()
@@ -238,5 +264,6 @@ bool UplinkSpool::clear()
         qCWarning(lcSpool) << "clear failed:" << q.lastError().text();
         return false;
     }
+    m_rowCount = 0;
     return true;
 }

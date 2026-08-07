@@ -73,6 +73,17 @@ public:
         emit disconnected();
     }
 
+    // A link that goes down without disconnected() reaching UplinkModel.
+    //
+    // Not a hypothetical: MosquittoCloudClient::disconnectFromBroker() used to
+    // do exactly this — teardown() cleared its connected flag directly, and the
+    // libmosquitto callback that would have reported it either never fired
+    // (loop_stop kills the network thread) or arrived after the flag was already
+    // false and stayed silent. onClientDisconnected() is the only place
+    // UplinkModel resets its drain bookkeeping, so this models the one input
+    // that could strand it.
+    void dropLinkSilently() { m_connected = false; }
+
     void setConnectShouldFail(bool fail) { m_connectShouldFail = fail; }
 
     // Raises the error the way the real client does — through the signal — so a

@@ -4,6 +4,8 @@
 
 #include <QString>
 
+#include <atomic>
+
 struct mosquitto;
 
 class CloudConfig;
@@ -21,6 +23,15 @@ class CloudConfig;
 //
 // Getting this wrong would not crash loudly; it would corrupt QObject
 // connection state under a rare race, on a device in a car.
+//
+// Queueing has a second consequence that is easy to miss: a callback raised on
+// the network thread can still be sitting in the main thread's event queue after
+// the handle it belongs to has been destroyed — which happens on every re-pair
+// and every UNPAIR, not only at shutdown. Acting on a stale one would flip
+// m_connected back to true against a null handle, and nothing could ever clear
+// it again because no further callback can arrive from a destroyed client. Each
+// teardown() therefore bumps m_generation, the trampolines stamp the value they
+// saw, and the main-thread handlers drop anything from an earlier generation.
 //
 // ## Reconnection
 //
@@ -56,15 +67,34 @@ private:
     static void onDisconnectTrampoline(struct mosquitto *m, void *self, int rc);
     static void onPublishTrampoline(struct mosquitto *m, void *self, int mid);
 
-    // Main-thread handlers invoked by the trampolines.
-    Q_INVOKABLE void handleConnect(int rc);
-    Q_INVOKABLE void handleDisconnect(int rc);
-    Q_INVOKABLE void handlePublish(int mid);
+    // Main-thread handlers invoked by the trampolines. `generation` is the value
+    // m_generation held when the callback fired; see the class note. Not
+    // Q_INVOKABLE — the trampolines use invokeMethod's functor overload, which
+    // needs no meta-object entry and is checked at compile time.
+    void handleConnect(int rc, quint64 generation);
+    void handleDisconnect(int rc, quint64 generation);
+    void handlePublish(int mid, quint64 generation);
 
-    void teardown();
+    // Whether a queued callback belongs to a handle that no longer exists.
+    bool isStale(quint64 generation) const;
+
+    // How mosquitto_loop_stop() is asked to end the network thread.
+    enum class StopMode {
+        Graceful, // wait for the thread to return — only safe once a DISCONNECT
+                  // has gone out over a live socket
+        Forced    // pthread_cancel it; bounded, but can cut a TLS handshake
+    };
+    void teardown(StopMode mode);
+
+    // Sends a DISCONNECT, tears the handle down, and emits disconnected() if we
+    // were connected. Everything that ends a live link goes through here.
+    void shutdownLink();
 
     CloudConfig      *m_config = nullptr;
     struct mosquitto *m_mosq   = nullptr;
     bool              m_connected  = false;
     bool              m_loopRunning = false;
+
+    // Read on the network thread, written on the main thread — hence atomic.
+    std::atomic<quint64> m_generation{ 0 };
 };

@@ -1,5 +1,7 @@
 #include <QtTest>
+#include <QDir>
 #include <QFile>
+#include <QFileInfo>
 #include <QStandardPaths>
 
 #include "src/apppaths.h"
@@ -17,6 +19,7 @@ private slots:
     void init();
     void persistsAndReloadsPairing();
     void configFileIsOwnerReadWriteOnly();
+    void persistLeavesNoStagingCopyBesideTheConfig();
     void passwordIsNotReadableThroughTheMetaObject();
     void configuredRequiresHostDeviceAndPassword();
     void clearPasswordUnpairsWithoutLosingTheBroker();
@@ -37,6 +40,10 @@ void TestCloudConfig::initTestCase()
 void TestCloudConfig::init()
 {
     QFile::remove(confPath());
+    // Left behind by builds predating the QTemporaryDir staging fix. Removed
+    // here so persistLeavesNoStagingCopyBesideTheConfig() tests what this run of
+    // persist() writes rather than what an older one did.
+    QFile::remove(confPath() + QStringLiteral(".build"));
 }
 
 void TestCloudConfig::persistsAndReloadsPairing()
@@ -81,6 +88,34 @@ void TestCloudConfig::configFileIsOwnerReadWriteOnly()
     QVERIFY(!perms.testFlag(QFileDevice::WriteGroup));
     QVERIFY(!perms.testFlag(QFileDevice::ReadOther));
     QVERIFY(!perms.testFlag(QFileDevice::WriteOther));
+}
+
+/**
+ * persist() serialises through QSettings before copying the bytes into the 0600
+ * file, and QSettings is exactly the thing the 0600 file exists to avoid: it
+ * writes with the process umask. That staging copy used to be a sibling of
+ * cloud.conf at the fixed path cloud.conf.build, so every setter call recreated
+ * a world-readable file containing the live broker password — and it was removed
+ * only on the success path, so an early return or a power cut left it there.
+ *
+ * This asserts the outcome rather than the mechanism: whatever persist() does
+ * internally, the data directory must hold cloud.conf and nothing else derived
+ * from it.
+ */
+void TestCloudConfig::persistLeavesNoStagingCopyBesideTheConfig()
+{
+    CloudConfig config;
+    config.setBrokerHost("telemetry.example.com");
+    config.setDeviceId("E46-001");
+    config.setPassword("not-a-real-credential");
+
+    const QFileInfo conf(confPath());
+    const QDir dir = conf.absoluteDir();
+
+    const QStringList strays = dir.entryList(
+        { conf.fileName() + QStringLiteral("*") }, QDir::Files);
+
+    QCOMPARE(strays, QStringList{ conf.fileName() });
 }
 
 /**

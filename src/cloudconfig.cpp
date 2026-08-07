@@ -4,6 +4,7 @@
 #include <QFile>
 #include <QSaveFile>
 #include <QSettings>
+#include <QTemporaryDir>
 #include <QTextStream>
 
 namespace {
@@ -56,12 +57,28 @@ void CloudConfig::persist()
     //     runs in a car, off the ignition) leaves the previous file intact
     //     rather than a truncated one that would strand the car unpaired.
     //
-    // So: serialise to a temp path via QSettings, then move the bytes across
-    // under a 0600 QSaveFile.
+    // So: serialise through QSettings, then move the bytes across under a 0600
+    // QSaveFile.
+    //
+    // The staging file goes in a QTemporaryDir, NOT next to cloud.conf. Reason 1
+    // above applies just as much to the staging copy: it is QSettings writing a
+    // file, so it too lands at 0644 with the password in it, and it used to sit
+    // at the fixed, guessable path cloud.conf.build — recreated on every setter
+    // call. Worse, it was only removed on the success path, so an early return
+    // or a power cut (the very case reason 2 exists for) left a world-readable
+    // credential on disk for good. QTemporaryDir is mkdtemp, which POSIX
+    // guarantees is 0700, so nothing else on the machine can read what is inside
+    // it whatever mode QSettings picks — and its destructor removes the tree on
+    // every path out of this function, including the early returns below.
     const QString path = configPath();
-    const QString scratch = path + ".build";
 
-    QFile::remove(scratch);
+    QTemporaryDir staging;
+    if (!staging.isValid()) {
+        qWarning("cloud.conf: could not create a private staging directory");
+        return;
+    }
+    const QString scratch = staging.filePath(QStringLiteral("cloud.conf"));
+
     {
         QSettings s(scratch, QSettings::IniFormat);
         s.setValue("SchemaVersion", kSchemaVersion);
@@ -82,7 +99,6 @@ void CloudConfig::persist()
     }
     const QByteArray bytes = in.readAll();
     in.close();
-    QFile::remove(scratch);
 
     QSaveFile out(path);
     if (!out.open(QIODevice::WriteOnly)) {

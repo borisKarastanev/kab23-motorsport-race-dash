@@ -201,6 +201,15 @@ int main(int argc, char *argv[])
     // main-thread state.
     const auto startUplink = [&uplinkModel] { uplinkModel.start(); };
 
+    // The other end of the same lifecycle. A session is opened by the lap timer
+    // but was only ever closed by the driver tapping Save Session, so a stint
+    // that ended with the ignition — which is most of them — left the cloud
+    // holding a session that never ended, and so never received its lap list or
+    // top speed. aboutToQuit fires before the models are destroyed, which is the
+    // last point at which a `stop` event can still reach the spool.
+    QObject::connect(&app, &QGuiApplication::aboutToQuit,
+                     &uplinkModel, [&uplinkModel] { uplinkModel.shutdown(); });
+
     if (auto *window = qobject_cast<QQuickWindow *>(engine.rootObjects().constFirst())) {
         QObject::connect(window, &QQuickWindow::frameSwapped, window,
                           &sdNotifyReady, Qt::SingleShotConnection);

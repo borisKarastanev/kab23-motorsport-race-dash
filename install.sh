@@ -28,7 +28,13 @@ step "Installing dependencies"
 # it and the build succeeds while the uplink spool fails at runtime with
 # "QSQLITE driver not loaded" — on the car, offline, which is precisely when the
 # spool is the only thing keeping the session.
+# pkg-config is not a nicety: CMakeLists.txt does find_package(PkgConfig REQUIRED)
+# to locate libmosquitto, and none of the packages below hard-depend on it. A
+# fresh Pi OS Lite image without it fails at `cmake` — during an on-device
+# update, i.e. after git checkout has already moved the working tree to the new
+# tag. CI never catches this because GitHub's runner image ships it.
 sudo apt install -y \
+    pkg-config \
     qt6-base-dev \
     qt6-declarative-dev \
     qt6-serialbus-dev \

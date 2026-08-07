@@ -86,6 +86,12 @@ public:
     // nothing on the uplink may run before the first frame is on screen.
     void start();
 
+    // Closes an open session and drops the link. Wired to
+    // QCoreApplication::aboutToQuit in main.cpp — process exit is the last
+    // chance to record that a session ended, and switching the ignition off is
+    // how most of them do end.
+    void shutdown();
+
     // Test seam — production uses AppPaths.
     void setSpoolPath(const QString &path) { m_spool.setDatabasePath(path); }
 
@@ -104,6 +110,13 @@ public slots:
     // Re-reads CloudConfig and reconnects. Bound to the settings page so
     // pairing takes effect without a restart.
     void applyConfiguration();
+
+    // Discards the backlog and abandons any open session. Q_INVOKABLE because
+    // the UNPAIR confirmation in CloudUplinkDetail.qml calls it: that dialog
+    // promises the queued frames are discarded, and a backlog belonging to a car
+    // this dash is no longer provisioned for must not be published to whatever
+    // it is paired with next.
+    Q_INVOKABLE void clearSpool();
 
 signals:
     void stateChanged();

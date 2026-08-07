@@ -325,6 +325,11 @@ Item {
         onConfirmed: {
             cloudConfig.clearPassword()
             cloudConfig.enabled = false
+            // Before applyConfiguration(), so the backlog is gone while the link
+            // is still the old car's. The message above promises this; without
+            // the call, re-pairing as a different car replayed the previous
+            // car's sessions under the new car's topics and credential.
+            uplinkModel.clearSpool()
             uplinkModel.applyConfiguration()
             unpairConfirm.visible = false
         }

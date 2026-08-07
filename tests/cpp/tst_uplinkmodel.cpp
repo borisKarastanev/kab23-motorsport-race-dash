@@ -13,6 +13,7 @@
 #include "src/raceboxmodel.h"
 #include "src/trackmodel.h"
 #include "src/uplinkmodel.h"
+#include "src/uplinkspool.h"
 
 namespace {
 
@@ -62,6 +63,11 @@ private slots:
     void frameCarriesEveryContractedChannel();
     void noCredentialAppearsInAnySignalOrErrorString();
     void aDisabledUplinkTouchesNothing();
+    void reconnectClearsADrainLeftHalfFinished();
+    void enablingTheUplinkAfterABootWithItOffFindsTheBacklog();
+    void unpairingDiscardsTheBacklogAndTheOpenSession();
+    void leavingRunningClosesTheSession();
+    void shutdownSpoolsAStopForAnUnsavedSession();
 
 private:
     struct Rig;
@@ -391,6 +397,183 @@ void TestUplinkModel::aDisabledUplinkTouchesNothing()
     QVERIFY(!rig.uplink.sessionActive());
     QVERIFY(rig.client.sent().isEmpty());
     QCOMPARE(rig.uplink.queuedFrames(), 0);
+}
+
+/**
+ * m_draining diverts *everything* to the spool even while the link is up, so a
+ * stale `true` is not a lost optimisation — it is an uplink that reports ONLINE
+ * while every frame goes to the SD card and nothing ever drains it.
+ *
+ * The state was reachable: a batch in flight when the link went down could still
+ * have its PUBACK delivered (queued), which released its rows and emptied the
+ * spool while leaving the flag set. onClientConnected() then only restarted the
+ * drain `if (count() > 0)` — so with an empty spool it never ran the code that
+ * would have cleared the flag, and the uplink never published again.
+ */
+void TestUplinkModel::reconnectClearsADrainLeftHalfFinished()
+{
+    Rig rig;
+    rig.goOffline();
+    rig.beginDriving();          // exactly one spooled row: the session start
+    QCOMPARE(rig.uplink.queuedFrames(), 1);
+
+    rig.restoreLink();           // drain publishes it and waits on the PUBACK
+    QCOMPARE(rig.client.sent().size(), 1);
+
+    // The link goes away without UplinkModel being told — see
+    // MockCloudClient::dropLinkSilently.
+    rig.client.dropLinkSilently();
+    // ...and the in-flight PUBACK still lands, emptying the spool.
+    rig.client.acknowledgeLast();
+    QCOMPARE(rig.uplink.queuedFrames(), 0);
+
+    rig.restoreLink();
+    QCOMPARE(rig.uplink.state(), UplinkModel::Online);
+
+    rig.client.clearSent();
+    rig.uplink.sampleOnceForTest();
+
+    QCOMPARE(rig.uplink.queuedFrames(), 0);
+    QCOMPARE(rig.client.sent().size(), 1);
+    QVERIFY2(rig.client.sent().first().topic.endsWith("/telemetry"),
+             "an ONLINE uplink with an empty spool must publish live, not spool");
+}
+
+/**
+ * The spool was opened from start() only, and only when the uplink was already
+ * enabled — so a dash that booted with it switched off never opened the database
+ * at all. count() returns 0 while it is closed, which made a backlog left on
+ * disk by the previous run invisible: no drain on connect, and 0 queued frames
+ * on the settings page while the rows sat on the card. The driver's track day
+ * was stranded until a full restart.
+ */
+void TestUplinkModel::enablingTheUplinkAfterABootWithItOffFindsTheBacklog()
+{
+    QTemporaryDir dir;
+    const QString spoolPath = dir.filePath("spool.sqlite");
+
+    // What the previous run left behind.
+    {
+        UplinkSpool previous;
+        previous.setDatabasePath(spoolPath);
+        QVERIFY(previous.open());
+
+        SpooledFrame row;
+        row.topic   = QStringLiteral("cars/E46TEST/session");
+        row.sid     = QStringLiteral("sid-from-the-last-run");
+        row.payload = QByteArray(R"({"v":1,"sid":"sid-from-the-last-run","event":"start"})");
+        QVERIFY(previous.append(row));
+    }
+
+    Rig rig;
+    rig.uplink.setSpoolPath(spoolPath);
+    rig.config.setEnabled(false);
+
+    rig.uplink.start();
+    QCOMPARE(rig.uplink.state(), UplinkModel::Disabled);
+    QCOMPARE(rig.uplink.queuedFrames(), 0); // still untouched, correctly
+
+    // The driver switches it on in the paddock, without restarting the app.
+    rig.config.setEnabled(true);
+    rig.uplink.applyConfiguration();
+
+    QCOMPARE(rig.uplink.queuedFrames(), 1);
+    QCOMPARE(rig.client.sent().size(), 1);
+    QCOMPARE(payloadOf(rig.client.sent().first())["sid"].toString(),
+             QStringLiteral("sid-from-the-last-run"));
+
+    rig.client.acknowledgeLast();
+    QCOMPARE(rig.uplink.queuedFrames(), 0);
+}
+
+/**
+ * The UNPAIR dialog promises it "discards any queued frames", and UplinkSpool
+ * ::clear() was written for exactly that — but nothing in production called it.
+ * A car unpaired with a backlog and then re-paired as a different car would
+ * drain the first car's sessions under the second car's topics and credential.
+ */
+void TestUplinkModel::unpairingDiscardsTheBacklogAndTheOpenSession()
+{
+    Rig rig;
+    rig.goOffline();
+    rig.beginDriving();
+    for (int i = 0; i < 3; ++i)
+        rig.uplink.sampleOnceForTest();
+    QCOMPARE(rig.uplink.queuedFrames(), 4);
+    QVERIFY(rig.uplink.sessionActive());
+
+    rig.uplink.clearSpool();
+
+    QCOMPARE(rig.uplink.queuedFrames(), 0);
+    // The open session goes too: its `start` went out under the old credential,
+    // so a later `stop` must not attach to it under a new one.
+    QVERIFY(!rig.uplink.sessionActive());
+
+    // Nothing survives to be published to whoever this dash is paired with next.
+    rig.restoreLink();
+    QVERIFY(rig.client.sent().isEmpty());
+}
+
+/**
+ * `stop` used to be reachable only from the driver tapping Save Session, so any
+ * other way out of a run left the cloud holding a session that never ended — and
+ * therefore never received its lap list or top speed. Clearing the finish line
+ * is one such way.
+ */
+void TestUplinkModel::leavingRunningClosesTheSession()
+{
+    Rig rig;
+    rig.goOnline();
+    rig.beginDriving();
+    QVERIFY(rig.uplink.sessionActive());
+
+    QSignalSpy spy(&rig.raceBox, &RaceBoxModel::lapTimerStateChanged);
+    rig.raceBox.clearFinishLine();
+    QVERIFY(spy.wait(1000));
+    QVERIFY(rig.raceBox.lapTimerState() != RaceBoxModel::Running);
+
+    QVERIFY(!rig.uplink.sessionActive());
+    const auto events = rig.client.sentOn("/session");
+    QCOMPARE(events.size(), 2);
+    QCOMPARE(payloadOf(events.last())["event"].toString(), QStringLiteral("stop"));
+}
+
+/**
+ * The commonest way a stint ends is the ignition, not the Save Session button.
+ * Without a shutdown hook m_sessionActive stayed true, so the 10 Hz sampler kept
+ * framing the drive home under that sid and the cloud never saw the session
+ * close.
+ *
+ * The `stop` goes to the spool rather than the wire deliberately: a QoS-1
+ * publish issued at exit is handed to libmosquitto's network thread and then
+ * killed with it before reaching the broker, and waiting for the PUBACK would
+ * mean blocking shutdown on a link that may already be dead.
+ */
+void TestUplinkModel::shutdownSpoolsAStopForAnUnsavedSession()
+{
+    Rig rig;
+    rig.goOnline();
+    rig.beginDriving();
+    rig.uplink.sampleOnceForTest();
+    QVERIFY(rig.uplink.sessionActive());
+    QCOMPARE(rig.uplink.queuedFrames(), 0);
+
+    rig.uplink.shutdown();
+
+    QVERIFY(!rig.uplink.sessionActive());
+    // Only the `start` ever went over the wire.
+    QCOMPARE(rig.client.sentOn("/session").size(), 1);
+    QCOMPARE(rig.uplink.queuedFrames(), 1);
+
+    // And what is in the spool is the stop the next connect will deliver.
+    UplinkSpool spooled;
+    spooled.setDatabasePath(rig.dir.filePath("spool.sqlite"));
+    QVERIFY(spooled.open());
+    const QVector<SpooledFrame> rows = spooled.peek();
+    QCOMPARE(rows.size(), 1);
+    QVERIFY(rows.first().topic.endsWith("/session"));
+    QCOMPARE(QJsonDocument::fromJson(rows.first().payload).object()["event"].toString(),
+             QStringLiteral("stop"));
 }
 
 QTEST_MAIN(TestUplinkModel)

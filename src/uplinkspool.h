@@ -65,12 +65,22 @@ public:
     ~UplinkSpool() override;
 
     // Path override exists for tests; production always uses
-    // AppPaths::dataFile("uplink-spool.sqlite").
+    // AppPaths::dataFile("uplink-spool.sqlite"). Clears a latched open failure.
     void setDatabasePath(const QString &path);
 
     // Opened lazily on first use, never in the constructor — main.cpp
     // constructs this during startup and the boot path must not touch the SD
     // card before the first frame is on screen. Safe to call repeatedly.
+    //
+    // A failure is latched rather than retried. append() calls this per frame at
+    // 10 Hz, and the failure this actually guards against — libqt6sql6-sqlite
+    // missing, see the warning below — is permanent for the life of the process.
+    // Retrying it ten times a second re-registered the same Qt SQL connection
+    // name on every tick, so Qt's own "duplicate connection name" warnings piled
+    // on top of ours into the on-screen Device Log and dash.log at 10+ lines a
+    // second, writing to the SD card continuously. setDatabasePath() clears the
+    // latch, because pointing the spool somewhere else is a genuinely new
+    // attempt rather than a retry of the one that failed.
     bool open();
 
     // Appends frames in one transaction. A burst of 200 costs one commit, not
@@ -94,8 +104,19 @@ public:
     // Deletes every row with id <= lastId. Called only from the PUBACK path.
     bool releaseThrough(qint64 lastId);
 
-    int  count();
-    bool isEmpty() { return count() == 0; }
+    // Rows currently spooled, or 0 while the spool is closed.
+    //
+    // Served from a cached counter, not from SELECT COUNT(*). `frames` carries
+    // only the rowid B-tree, so COUNT(*) is a full table scan — ~12 ms at 200k
+    // rows on a warm-cache desktop NVMe, and far worse on a Pi 4 reading a
+    // couple of hundred MB off an SD card with a cold page cache. This is called
+    // twice for every spooled frame (evictOverflow() plus UplinkModel's queued
+    // -frames refresh) on the GUI thread at 10 Hz, so scanning here meant the
+    // dashboard's own render loop started stuttering in proportion to how far
+    // behind the uplink had fallen — i.e. exactly when the spool was doing its
+    // job. Every mutation below adjusts the counter instead.
+    int  count() const { return m_open ? m_rowCount : 0; }
+    bool isEmpty() const { return count() == 0; }
 
     // Drops everything. Used when the driver un-pairs the device: a backlog
     // belonging to a car this dash is no longer provisioned for must not be
@@ -106,9 +127,20 @@ private:
     bool ensureSchema();
     // Trims to kMaxRows, oldest first. Called after each append.
     void evictOverflow();
+    // The one SELECT COUNT(*) this class performs, on open only, to seed
+    // m_rowCount from whatever the last run left on disk.
+    int  countFromDb();
+    // Closes and de-registers the Qt SQL connection. Used by the destructor and
+    // by the failure paths in open(), so a later attempt with a new path does
+    // not hit addDatabase() with a name that is still registered.
+    void abandonConnection();
 
     QString       m_path;
     QSqlDatabase  m_db;
     bool          m_open = false;
+    bool          m_openFailed = false;
+    // Authoritative while m_open; seeded by countFromDb() and maintained by
+    // every mutation. See count().
+    int           m_rowCount = 0;
     QString       m_connectionName;
 };

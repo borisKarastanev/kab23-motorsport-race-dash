@@ -42,24 +42,62 @@ MosquittoCloudClient::MosquittoCloudClient(CloudConfig *config, QObject *parent)
 
 MosquittoCloudClient::~MosquittoCloudClient()
 {
-    teardown();
+    // No shutdownLink() here: emitting disconnected() out of a destructor would
+    // re-enter UplinkModel while this object is half-destroyed. Forced, because
+    // at process exit latency is the only thing that matters.
+    teardown(StopMode::Forced);
 }
 
-void MosquittoCloudClient::teardown()
+void MosquittoCloudClient::teardown(StopMode mode)
 {
+    // Bumped unconditionally, before anything else: from here on, any callback
+    // already queued to the main thread belongs to a handle that is going away
+    // and must be ignored. See the class note.
+    ++m_generation;
+
     if (!m_mosq)
         return;
 
     if (m_loopRunning) {
-        // force=true: without it this blocks until the network thread finishes
+        // force=true is pthread_cancel on the network thread. That is the right
+        // trade at shutdown — without it this blocks until the thread finishes
         // whatever it is doing, which on a dead LTE link is the full keepalive
-        // timeout — turning app shutdown into a 30 s hang in a car.
-        mosquitto_loop_stop(m_mosq, true);
+        // timeout, i.e. a 30 s hang in a car — but it is the wrong one on the
+        // re-pair path, where cancelling mid-OpenSSL-handshake can leave the
+        // library's own state inconsistent for the connect that follows
+        // immediately after. shutdownLink() asks for Graceful once it has sent a
+        // DISCONNECT over a live socket, where the thread returns promptly.
+        mosquitto_loop_stop(m_mosq, mode == StopMode::Forced);
         m_loopRunning = false;
     }
     mosquitto_destroy(m_mosq);
     m_mosq = nullptr;
     m_connected = false;
+}
+
+void MosquittoCloudClient::shutdownLink()
+{
+    const bool wasConnected = m_connected;
+
+    if (m_mosq)
+        mosquitto_disconnect(m_mosq);
+
+    // Graceful only when there was a live socket to send the DISCONNECT on;
+    // otherwise the thread may be blocked in a connect or a handshake and a
+    // non-forced stop would freeze the GUI thread for the keepalive interval.
+    teardown(wasConnected ? StopMode::Graceful : StopMode::Forced);
+
+    // The whole reason this function exists. teardown() clears m_connected
+    // directly, and libmosquitto's own on_disconnect cannot be relied on to
+    // cover for it: loop_stop may end the network thread before the callback
+    // fires, and even when it does fire, the queued hop to the main thread lands
+    // after m_connected is already false — so handleDisconnect() sees
+    // wasConnected == false and stays silent too. That left
+    // UplinkModel::onClientDisconnected() — the only place the drain state is
+    // reset — never running on an app-initiated disconnect, which stranded
+    // m_draining true and sent every subsequent frame to the spool forever.
+    if (wasConnected)
+        emit disconnected();
 }
 
 void MosquittoCloudClient::connectToBroker()
@@ -70,7 +108,10 @@ void MosquittoCloudClient::connectToBroker()
     }
 
     ensureLibraryInitialised();
-    teardown();
+    // Not a bare teardown(): re-pairing while online is an app-initiated
+    // disconnect like any other, and UplinkModel has drain state that only
+    // disconnected() clears.
+    shutdownLink();
 
     const QByteArray clientId = m_config->deviceId().toUtf8();
 
@@ -110,7 +151,7 @@ void MosquittoCloudClient::connectToBroker()
             // the broker password on the air over LTE.
             emit errorOccurred(tr("TLS setup failed: %1")
                                    .arg(QString::fromUtf8(mosquitto_strerror(rc))));
-            teardown();
+            teardown(StopMode::Forced);
             return;
         }
 
@@ -137,13 +178,13 @@ void MosquittoCloudClient::connectToBroker()
     if (rc != MOSQ_ERR_SUCCESS) {
         emit errorOccurred(tr("Connect failed: %1")
                                .arg(QString::fromUtf8(mosquitto_strerror(rc))));
-        teardown();
+        teardown(StopMode::Forced);
         return;
     }
 
     if (mosquitto_loop_start(m_mosq) != MOSQ_ERR_SUCCESS) {
         emit errorOccurred(tr("Could not start MQTT network thread"));
-        teardown();
+        teardown(StopMode::Forced);
         return;
     }
     m_loopRunning = true;
@@ -157,9 +198,7 @@ void MosquittoCloudClient::connectToBroker()
 
 void MosquittoCloudClient::disconnectFromBroker()
 {
-    if (m_mosq)
-        mosquitto_disconnect(m_mosq);
-    teardown();
+    shutdownLink();
 }
 
 int MosquittoCloudClient::publish(const QString &topic, const QByteArray &payload, int qos)
@@ -188,28 +227,58 @@ int MosquittoCloudClient::publish(const QString &topic, const QByteArray &payloa
 // Each of these is running on libmosquitto's thread. They touch nothing but the
 // queued invocation, because everything else here is main-thread state.
 
+// The functor overload of invokeMethod, not the "methodName" one: the generation
+// stamp is an extra argument on each handler, and a string-matched invocation
+// that failed to resolve would fail at *runtime*, as a warning nobody reads,
+// leaving the uplink permanently unable to learn it had connected. This form is
+// checked by the compiler. The receiver context is still the client, so Qt drops
+// any invocation left pending when it is destroyed.
+
 void MosquittoCloudClient::onConnectTrampoline(struct mosquitto *, void *self, int rc)
 {
     auto *client = static_cast<MosquittoCloudClient *>(self);
-    QMetaObject::invokeMethod(client, "handleConnect", Qt::QueuedConnection, Q_ARG(int, rc));
+    const quint64 generation = client->m_generation.load();
+    QMetaObject::invokeMethod(client, [client, rc, generation] {
+        client->handleConnect(rc, generation);
+    }, Qt::QueuedConnection);
 }
 
 void MosquittoCloudClient::onDisconnectTrampoline(struct mosquitto *, void *self, int rc)
 {
     auto *client = static_cast<MosquittoCloudClient *>(self);
-    QMetaObject::invokeMethod(client, "handleDisconnect", Qt::QueuedConnection, Q_ARG(int, rc));
+    const quint64 generation = client->m_generation.load();
+    QMetaObject::invokeMethod(client, [client, rc, generation] {
+        client->handleDisconnect(rc, generation);
+    }, Qt::QueuedConnection);
 }
 
 void MosquittoCloudClient::onPublishTrampoline(struct mosquitto *, void *self, int mid)
 {
     auto *client = static_cast<MosquittoCloudClient *>(self);
-    QMetaObject::invokeMethod(client, "handlePublish", Qt::QueuedConnection, Q_ARG(int, mid));
+    const quint64 generation = client->m_generation.load();
+    QMetaObject::invokeMethod(client, [client, mid, generation] {
+        client->handlePublish(mid, generation);
+    }, Qt::QueuedConnection);
 }
 
 // --- main thread -------------------------------------------------------------
 
-void MosquittoCloudClient::handleConnect(int rc)
+// A queued callback is stale when the handle that raised it has since been
+// destroyed by teardown(). Such a callback must be dropped rather than acted on:
+// handleConnect() in particular would otherwise set m_connected against a null
+// m_mosq, leaving a client that reports itself online, cannot publish, and can
+// never be disconnected again — no further callback can arrive from a handle
+// that no longer exists.
+bool MosquittoCloudClient::isStale(quint64 generation) const
 {
+    return generation != m_generation.load() || !m_mosq;
+}
+
+void MosquittoCloudClient::handleConnect(int rc, quint64 generation)
+{
+    if (isStale(generation))
+        return;
+
     if (rc != 0) {
         m_connected = false;
         // rc 4/5 are bad-credentials / not-authorised. Say which, because "the
@@ -228,8 +297,11 @@ void MosquittoCloudClient::handleConnect(int rc)
     emit connected();
 }
 
-void MosquittoCloudClient::handleDisconnect(int rc)
+void MosquittoCloudClient::handleDisconnect(int rc, quint64 generation)
 {
+    if (isStale(generation))
+        return;
+
     const bool wasConnected = m_connected;
     m_connected = false;
 
@@ -242,7 +314,13 @@ void MosquittoCloudClient::handleDisconnect(int rc)
         emit disconnected();
 }
 
-void MosquittoCloudClient::handlePublish(int mid)
+void MosquittoCloudClient::handlePublish(int mid, quint64 generation)
 {
+    if (isStale(generation))
+        return;
+
+    // mid values are per-handle. Releasing spool rows against a PUBACK from a
+    // client that has since been destroyed could acknowledge a batch that the
+    // current one never sent.
     emit published(mid);
 }

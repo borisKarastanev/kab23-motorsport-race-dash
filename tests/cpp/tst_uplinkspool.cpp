@@ -1,7 +1,22 @@
 #include <QtTest>
+#include <QRegularExpression>
 #include <QTemporaryDir>
 
 #include "src/uplinkspool.h"
+
+namespace {
+
+// Counts UplinkSpool's own open-failure warnings, and swallows everything else
+// while installed so a deliberately-failing open does not spray the test log.
+int g_openWarnings = 0;
+
+void countOpenWarnings(QtMsgType type, const QMessageLogContext &, const QString &message)
+{
+    if (type == QtWarningMsg && message.contains(QLatin1String("could not open spool")))
+        ++g_openWarnings;
+}
+
+} // namespace
 
 // Store-and-forward is the whole reason the uplink is safe to run over LTE, so
 // these tests are about the guarantees rather than the SQL: FIFO order, survival
@@ -20,6 +35,8 @@ private slots:
     void clearEmptiesTheSpool();
     void peekRunStopsAtATopicChange();
     void peekRunStopsAtASessionBoundary();
+    void countTracksEveryMutationWithoutScanning();
+    void aFailedOpenIsNotRetried();
 
 private:
     QString dbPath() const { return m_dir.filePath("spool.sqlite"); }
@@ -232,6 +249,111 @@ void TestUplinkSpool::peekRunStopsAtASessionBoundary()
     QCOMPARE(run.size(), 2);
     for (const SpooledFrame &f : run)
         QCOMPARE(f.sid, QStringLiteral("sid-a"));
+}
+
+/**
+ * count() is served from a cached counter rather than SELECT COUNT(*), because
+ * `frames` has only the rowid B-tree and the scan is called twice per spooled
+ * frame on the GUI thread at 10 Hz — so on a Pi with a real backlog it was
+ * stealing a fifth of the render budget, worsening exactly as the spool filled.
+ *
+ * A cached counter is only correct if every mutation maintains it, and a drift
+ * would be invisible at the call sites (they just see a number). So: exercise
+ * each mutation and check the counter still agrees with what is on disk, read
+ * back through peek() rather than through count() itself.
+ */
+void TestUplinkSpool::countTracksEveryMutationWithoutScanning()
+{
+    const auto rowsOnDisk = [](UplinkSpool &s) {
+        return s.peek(UplinkSpool::kMaxRows).size();
+    };
+
+    UplinkSpool spool;
+    spool.setDatabasePath(dbPath());
+    QVERIFY(spool.open());
+    QCOMPARE(spool.count(), 0);
+
+    // append, singly and in a batch
+    QVERIFY(spool.append(frame("sid-a", 0)));
+    QCOMPARE(spool.count(), 1);
+    QVERIFY(spool.append(QVector<SpooledFrame>{ frame("sid-a", 1), frame("sid-a", 2) }));
+    QCOMPARE(spool.count(), 3);
+    QCOMPARE(spool.count(), rowsOnDisk(spool));
+
+    // releaseThrough — a partial delete, so the counter must come from what the
+    // statement actually removed rather than from the batch size
+    QVERIFY(spool.releaseThrough(spool.peek(2).last().id));
+    QCOMPARE(spool.count(), 1);
+    QCOMPARE(spool.count(), rowsOnDisk(spool));
+
+    // releasing an id that matches nothing must not move it
+    QVERIFY(spool.releaseThrough(-1));
+    QCOMPARE(spool.count(), 1);
+
+    // clear
+    QVERIFY(spool.clear());
+    QCOMPARE(spool.count(), 0);
+    QCOMPARE(spool.count(), rowsOnDisk(spool));
+
+    // and the seed on reopen comes from the file, not from this instance
+    QVERIFY(spool.append(frame("sid-b", 0)));
+    UplinkSpool reopened;
+    reopened.setDatabasePath(dbPath());
+    QVERIFY(reopened.open());
+    QCOMPARE(reopened.count(), 1);
+}
+
+/**
+ * append() calls open() on every frame, so a permanent failure — in practice
+ * libqt6sql6-sqlite missing, which is packaged separately from the Qt SQL
+ * headers and so fails at runtime on a machine that built fine — used to be
+ * retried at 10 Hz. Each retry re-registered the same Qt SQL connection name,
+ * so Qt's own "duplicate connection name" warnings piled onto ours in the
+ * on-screen Device Log and dash.log at 10+ lines a second, writing to the SD
+ * card continuously.
+ *
+ * Driven here through an unopenable path rather than by removing the driver.
+ */
+void TestUplinkSpool::aFailedOpenIsNotRetried()
+{
+    UplinkSpool spool;
+    // A path under a component that exists but is a file, not a directory:
+    // SQLite cannot create a database there.
+    const QString wall = m_dir.filePath("not-a-directory");
+    {
+        QFile f(wall);
+        QVERIFY(f.open(QIODevice::WriteOnly));
+        f.write("x");
+    }
+    spool.setDatabasePath(wall + QStringLiteral("/spool.sqlite"));
+
+    // Counting the warnings is the assertion, not a nicety: the un-latched
+    // version still returned false every time, so a test that only checked the
+    // return value passed against the bug. What was wrong was the *volume* —
+    // append() calls open() per frame, so this line went to the Device Log and
+    // dash.log ten times a second for as long as the app ran.
+    bool anyOpenSucceeded   = false;
+    bool anyAppendSucceeded = false;
+
+    g_openWarnings = 0;
+    QtMessageHandler previous = qInstallMessageHandler(&countOpenWarnings);
+    anyOpenSucceeded = spool.open();
+    for (int i = 0; i < 5; ++i) {
+        anyOpenSucceeded   = spool.open()               || anyOpenSucceeded;
+        anyAppendSucceeded = spool.append(frame("s", i)) || anyAppendSucceeded;
+    }
+    qInstallMessageHandler(previous);
+
+    QVERIFY(!anyOpenSucceeded);
+    QVERIFY(!anyAppendSucceeded);
+    QCOMPARE(g_openWarnings, 1);
+    QCOMPARE(spool.count(), 0);
+
+    // Pointing the spool somewhere else is a new attempt, not a retry.
+    spool.setDatabasePath(dbPath());
+    QVERIFY(spool.open());
+    QVERIFY(spool.append(frame("sid-a", 0)));
+    QCOMPARE(spool.count(), 1);
 }
 
 QTEST_MAIN(TestUplinkSpool)

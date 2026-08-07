@@ -124,16 +124,6 @@ void UplinkModel::start()
         return;
     m_started = true;
 
-    if (!enabled()) {
-        setState(Disabled);
-        return;
-    }
-
-    // First touch of the SD card, deliberately after the first frame is on
-    // screen rather than during construction.
-    m_spool.open();
-    refreshQueuedFrames();
-
     applyConfiguration();
 }
 
@@ -147,14 +137,28 @@ void UplinkModel::applyConfiguration()
         return;
     }
 
+    if (!m_started)
+        return; // start() will get here once the first frame has been presented
+
+    // First touch of the SD card, deliberately after the first frame is on
+    // screen rather than during construction.
+    //
+    // Here rather than in start(), and before the configured() check, because
+    // this runs on every enable — not just the first one after boot. A dash that
+    // boots with the uplink switched off never opened the spool, so a backlog
+    // left on disk by the previous run was invisible: count() reports 0 while
+    // the database is closed, so onClientConnected() saw an empty spool and
+    // never started a drain, and the settings page showed 0 queued frames while
+    // the rows sat on the card. Switching the uplink on in the paddock stranded
+    // the whole track day until a full app restart.
+    m_spool.open();
+    refreshQueuedFrames();
+
     if (!m_config->configured()) {
         m_sampleTimer.stop();
         setState(Unconfigured);
         return;
     }
-
-    if (!m_started)
-        return; // start() will get here once the first frame has been presented
 
     setLastError(QString());
     setState(Connecting);
@@ -163,27 +167,99 @@ void UplinkModel::applyConfiguration()
         m_client->connectToBroker();
 }
 
+void UplinkModel::shutdown()
+{
+    if (!m_started)
+        return;
+
+    // A session that was opened must be closed, and process exit is the last
+    // chance: `stop` was previously reachable only from the driver tapping Save
+    // Session, so a stint that ended any other way left the cloud holding a
+    // session that never ended — and therefore never received its lap list or
+    // top speed.
+    //
+    // Straight to the spool rather than through dispatch(), even when the link
+    // is up. A QoS-1 publish issued here is handed to libmosquitto's network
+    // thread and then killed by the disconnect below before it can reach the
+    // wire, and waiting for the PUBACK would mean blocking shutdown on a link
+    // that may be dead. The spool survives the power cut this is usually part
+    // of, and the next connect drains it.
+    if (m_sessionActive) {
+        qCInfo(lcUplink) << "session stop (shutdown)" << m_sid;
+        spool(sessionTopic(), buildSessionEvent(QStringLiteral("stop")), 0);
+        m_sessionActive = false;
+        emit sessionActiveChanged();
+    }
+
+    m_sampleTimer.stop();
+    if (m_client)
+        m_client->disconnectFromBroker();
+}
+
+void UplinkModel::clearSpool()
+{
+    // Un-pairing means this dash is no longer provisioned for the car the
+    // backlog belongs to. Draining it after a re-pair would publish one car's
+    // sessions under another car's topics and credential — which is what the
+    // UNPAIR dialog has always promised does not happen, while nothing in
+    // production actually called UplinkSpool::clear().
+    m_draining       = false;
+    m_inFlightMid    = -1;
+    m_inFlightLastId = -1;
+
+    m_spool.clear();
+    refreshQueuedFrames();
+
+    // The in-progress session goes with it. Its `start` event was published
+    // under the old credential, so a later `stop` under a new one would attach
+    // to a session the new car never opened.
+    if (m_sessionActive) {
+        m_sessionActive = false;
+        emit sessionActiveChanged();
+    }
+    m_sid.clear();
+    m_seq = 0;
+    m_lapTimesMs.clear();
+    m_topSpeedKmh = 0;
+
+    qCInfo(lcUplink) << "spool cleared — device unpaired";
+}
+
 // --- session lifecycle -------------------------------------------------------
 
 void UplinkModel::onLapTimerStateChanged()
 {
-    // The enabled() guard is load-bearing, not defensive. These slots are wired
-    // to RaceBoxModel/SessionModel signals that fire whether or not the driver
-    // has switched the uplink on — and beginSession() dispatches, which spools
-    // when there is no link. Without this, an unpaired dash would write a
-    // session event to the SD card for every run it ever does, and switching
-    // the uplink on months later would flood the broker with a backlog of
-    // sessions nobody asked to upload.
-    if (!m_raceBox || !enabled())
+    if (!m_raceBox)
         return;
 
     const bool running = m_raceBox->lapTimerState() == RaceBoxModel::Running;
 
-    // Only the transition into Running opens a session. Reusing the dash's own
-    // lap-timer lifecycle rather than inventing a second notion of "a run" is
-    // what keeps the cloud's session list agreeing with what the driver saw.
-    if (running && !m_sessionActive)
-        beginSession();
+    if (running) {
+        // The enabled() guard is load-bearing, not defensive, and it belongs on
+        // the *opening* path only. These slots are wired to RaceBoxModel/
+        // SessionModel signals that fire whether or not the driver has switched
+        // the uplink on — and beginSession() dispatches, which spools when there
+        // is no link. Without this, an unpaired dash would write a session event
+        // to the SD card for every run it ever does, and switching the uplink on
+        // months later would flood the broker with a backlog of sessions nobody
+        // asked to upload.
+        //
+        // Reusing the dash's own lap-timer lifecycle rather than inventing a
+        // second notion of "a run" is what keeps the cloud's session list
+        // agreeing with what the driver saw.
+        if (!m_sessionActive && enabled())
+            beginSession();
+        return;
+    }
+
+    // Leaving Running closes the session, whether or not the uplink is still
+    // enabled — the same reasoning as onSessionSaved(): a session that was
+    // opened must be closed, or the cloud is left holding one that never ends.
+    // Today this transition comes from a session save (which onSessionSaved()
+    // has usually already handled, hence the m_sessionActive guard) or from the
+    // finish line being cleared, which had no path to a `stop` event at all.
+    if (m_sessionActive)
+        endSession();
 }
 
 void UplinkModel::onSessionSaved()
@@ -342,10 +418,20 @@ void UplinkModel::onClientConnected()
     setState(Online);
     setLastError(QString());
 
-    if (m_spool.count() > 0) {
-        m_draining = true;
+    // Assigned unconditionally, never only set. m_draining diverts *everything*
+    // to the spool (see dispatch()), so a stale true is not a missed
+    // optimisation — it is an uplink that reports ONLINE while every frame goes
+    // to the SD card and nothing ever drains it. That state was reachable: a
+    // batch in flight when the link went down could release its rows on a queued
+    // PUBACK, leaving the spool empty and m_draining true, and the old
+    // `if (count() > 0)` then declined to restart the drain that would have
+    // cleared the flag.
+    m_draining = m_spool.count() > 0;
+    m_inFlightMid    = -1;
+    m_inFlightLastId = -1;
+
+    if (m_draining)
         drainNext();
-    }
 }
 
 void UplinkModel::onClientDisconnected()
@@ -355,7 +441,13 @@ void UplinkModel::onClientDisconnected()
     m_draining = false;
     m_inFlightMid = -1;
     m_inFlightLastId = -1;
-    if (enabled() && m_config && m_config->configured())
+
+    // Only a link that was Online degrades to Offline. Reconfiguring while
+    // connected also arrives here — applyConfiguration() sets Connecting and
+    // then connectToBroker() disconnects the old handle, which now reports it —
+    // and that must not overwrite Connecting with "Offline — buffering" for a
+    // link that is in the middle of being brought up.
+    if (m_state == Online && enabled() && m_config && m_config->configured())
         setState(Offline);
 }
 
