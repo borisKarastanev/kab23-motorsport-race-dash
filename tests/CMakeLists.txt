@@ -113,6 +113,55 @@ target_link_libraries(tst_dashconfig PRIVATE Qt6::Test)
 add_test(NAME tst_dashconfig COMMAND tst_dashconfig)
 set_tests_properties(tst_dashconfig PROPERTIES ENVIRONMENT "${DASH_TEST_ENV}")
 
+# ── uplinkspool: store-and-forward FIFO durability ────────────────────
+# The guarantees that make the uplink safe over a lossy LTE link: FIFO order,
+# survival across a restart, deletion only on PUBACK, bounded growth. Uses a
+# QTemporaryDir rather than QStandardPaths test mode because UplinkSpool takes
+# an explicit path seam (setDatabasePath) for exactly this.
+add_executable(tst_uplinkspool cpp/tst_uplinkspool.cpp
+    ${APP_SRC_DIR}/src/uplinkspool.cpp
+    ${APP_SRC_DIR}/src/logging.cpp
+)
+target_include_directories(tst_uplinkspool PRIVATE ${APP_SRC_DIR})
+target_link_libraries(tst_uplinkspool PRIVATE Qt6::Test Qt6::Sql)
+add_test(NAME tst_uplinkspool COMMAND tst_uplinkspool)
+set_tests_properties(tst_uplinkspool PROPERTIES ENVIRONMENT "${DASH_TEST_ENV}")
+
+# ── uplinkmodel: framing, sid/seq, mono, online-vs-spool decision ─────
+# Runs against MockCloudClient, so no broker and no background thread. The lap
+# timer is driven into Running through RaceBoxModel's real gate-crossing path
+# rather than a back door, so the session lifecycle under test is the one the
+# driver actually sees.
+add_executable(tst_uplinkmodel cpp/tst_uplinkmodel.cpp
+    # Both are header-only Q_OBJECTs, so they must be listed for AUTOMOC to
+    # generate their meta-objects — otherwise the signals link as undefined.
+    ${APP_SRC_DIR}/src/icloudclient.h
+    ${APP_SRC_DIR}/src/mockcloudclient.h
+    ${APP_SRC_DIR}/src/uplinkmodel.cpp
+    ${APP_SRC_DIR}/src/uplinkspool.cpp
+    ${APP_SRC_DIR}/src/cloudconfig.cpp
+    ${APP_SRC_DIR}/src/candatamodel.cpp
+    ${APP_SRC_DIR}/src/raceboxmodel.cpp
+    ${APP_SRC_DIR}/src/trackmodel.cpp
+    ${APP_SRC_DIR}/src/logging.cpp
+)
+target_include_directories(tst_uplinkmodel PRIVATE ${APP_SRC_DIR})
+target_link_libraries(tst_uplinkmodel PRIVATE Qt6::Test Qt6::Sql Qt6::SerialBus Qt6::Network)
+add_test(NAME tst_uplinkmodel COMMAND tst_uplinkmodel)
+set_tests_properties(tst_uplinkmodel PROPERTIES ENVIRONMENT "${DASH_TEST_ENV}")
+
+# ── cloudconfig: credential storage, 0600 permissions, no leakage ─────
+# Uses QStandardPaths::setTestModeEnabled() to sandbox cloud.conf away from the
+# real user's paired credential.
+add_executable(tst_cloudconfig cpp/tst_cloudconfig.cpp
+    ${APP_SRC_DIR}/src/cloudconfig.cpp
+    ${APP_SRC_DIR}/src/logging.cpp
+)
+target_include_directories(tst_cloudconfig PRIVATE ${APP_SRC_DIR})
+target_link_libraries(tst_cloudconfig PRIVATE Qt6::Test)
+add_test(NAME tst_cloudconfig COMMAND tst_cloudconfig)
+set_tests_properties(tst_cloudconfig PROPERTIES ENVIRONMENT "${DASH_TEST_ENV}")
+
 # ── QML (Qt Quick Test) ────────────────────────────────────────────────
 # Test .qml files load the real qml/*.qml sources directly off disk via
 # relative directory imports (not through the app's compiled qrc resources),
