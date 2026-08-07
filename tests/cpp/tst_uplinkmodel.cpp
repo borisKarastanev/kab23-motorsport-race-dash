@@ -61,6 +61,7 @@ private slots:
     void spoolRowsSurviveUntilThePubackArrives();
     void frameCarriesEveryContractedChannel();
     void noCredentialAppearsInAnySignalOrErrorString();
+    void aDisabledUplinkTouchesNothing();
 
 private:
     struct Rig;
@@ -368,6 +369,28 @@ void TestUplinkModel::noCredentialAppearsInAnySignalOrErrorString()
     for (const MockCloudClient::Message &m : rig.client.sent())
         QVERIFY2(!QString::fromUtf8(m.payload).contains(secret),
                  "a published payload carried the broker credential");
+}
+
+/**
+ * Found by running the app: the uplink is opt-in and off by default, but the
+ * session-lifecycle slots are wired to signals that fire regardless — so an
+ * unpaired dash was spooling a session event for every run it ever did. That is
+ * SD-card wear for data that can never be sent, and a backlog that would flood
+ * the broker the day someone switched the uplink on.
+ */
+void TestUplinkModel::aDisabledUplinkTouchesNothing()
+{
+    Rig rig;
+    rig.config.setEnabled(false);
+    rig.uplink.start();
+
+    rig.beginDriving();
+    rig.uplink.sampleOnceForTest();
+
+    QCOMPARE(rig.uplink.state(), UplinkModel::Disabled);
+    QVERIFY(!rig.uplink.sessionActive());
+    QVERIFY(rig.client.sent().isEmpty());
+    QCOMPARE(rig.uplink.queuedFrames(), 0);
 }
 
 QTEST_MAIN(TestUplinkModel)

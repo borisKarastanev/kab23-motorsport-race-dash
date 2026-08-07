@@ -11,6 +11,7 @@ Item {
         ListElement { itemTitle: "DEVICE LOG";    itemKey: "device-log" }
         ListElement { itemTitle: "DISPLAY";       itemKey: "display" }
         ListElement { itemTitle: "NETWORK CONNECTION"; itemKey: "network" }
+        ListElement { itemTitle: "CLOUD UPLINK";       itemKey: "cloud-uplink" }
     }
 
     ListView {

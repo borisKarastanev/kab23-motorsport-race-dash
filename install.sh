@@ -23,11 +23,18 @@ step() {
 }
 
 step "Installing dependencies"
+# On libqt6sql6-sqlite specifically: the Qt SQL *headers* ship with
+# qt6-base-dev, but Debian packages the SQLite driver *plugin* separately. Miss
+# it and the build succeeds while the uplink spool fails at runtime with
+# "QSQLITE driver not loaded" — on the car, offline, which is precisely when the
+# spool is the only thing keeping the session.
 sudo apt install -y \
     qt6-base-dev \
     qt6-declarative-dev \
     qt6-serialbus-dev \
     qt6-connectivity-dev \
+    libmosquitto-dev \
+    libqt6sql6-sqlite \
     can-utils \
     libsocketcan2 \
     libxkbcommon-dev \

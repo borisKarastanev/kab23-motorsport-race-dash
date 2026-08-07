@@ -35,6 +35,8 @@
         <file>qml/settings/OnScreenKeyboard.qml</file>
         <file>qml/settings/TextButton.qml</file>
         <file>qml/settings/StatRow.qml</file>
+        <file>qml/settings/CloudUplinkDetail.qml</file>
+        <file>qml/settings/TextEntryModal.qml</file>
         <file>qml/Gauge.qml</file>
         <file>qml/GearIndicator.qml</file>
         <file>qml/LedStrip.qml</file>

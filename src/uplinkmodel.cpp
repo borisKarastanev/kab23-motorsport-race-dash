@@ -167,7 +167,14 @@ void UplinkModel::applyConfiguration()
 
 void UplinkModel::onLapTimerStateChanged()
 {
-    if (!m_raceBox)
+    // The enabled() guard is load-bearing, not defensive. These slots are wired
+    // to RaceBoxModel/SessionModel signals that fire whether or not the driver
+    // has switched the uplink on — and beginSession() dispatches, which spools
+    // when there is no link. Without this, an unpaired dash would write a
+    // session event to the SD card for every run it ever does, and switching
+    // the uplink on months later would flood the broker with a backlog of
+    // sessions nobody asked to upload.
+    if (!m_raceBox || !enabled())
         return;
 
     const bool running = m_raceBox->lapTimerState() == RaceBoxModel::Running;
@@ -181,6 +188,10 @@ void UplinkModel::onLapTimerStateChanged()
 
 void UplinkModel::onSessionSaved()
 {
+    // No enabled() guard: m_sessionActive can only be true if the uplink was
+    // enabled when the session began, and a session that was started must be
+    // closed even if the driver switched the uplink off mid-run — otherwise the
+    // cloud is left with a session that never ends.
     if (m_sessionActive)
         endSession();
 }

@@ -22,6 +22,9 @@
 #include "src/displaymodel.h"
 #include "src/updatemodel.h"
 #include "src/networkmodel.h"
+#include "src/cloudconfig.h"
+#include "src/mosquittocloudclient.h"
+#include "src/uplinkmodel.h"
 
 #ifdef HAVE_BLUETOOTH
 #include "src/raceboxprovider.h"
@@ -50,6 +53,8 @@ int main(int argc, char *argv[])
                                      "Updates", "Enum access only");
     qmlRegisterUncreatableMetaObject(NetworkModel::staticMetaObject, "RaceDash", 1, 0,
                                      "Net", "Enum access only");
+    qmlRegisterUncreatableMetaObject(UplinkModel::staticMetaObject, "RaceDash", 1, 0,
+                                     "Uplink", "Enum access only");
 
     QCommandLineParser parser;
     parser.addOption({"mock",  "Use mock providers (no hardware required)"});
@@ -130,6 +135,31 @@ int main(int argc, char *argv[])
                      &raceBoxModel, &RaceBoxModel::clearFinishLine);
     trackModel.applyStartupFinishLine();
 
+    // Cloud uplink. Uses the REAL client even under --mock: mock mode is about
+    // not needing a CAN adapter and a RaceBox, not about faking the network, and
+    // pointing this at a local broker through CloudConfig is how the uplink gets
+    // bench-tested. MockCloudClient exists for unit tests only.
+    //
+    // Construction is cheap by contract — no socket, no SD-card access, no timer
+    // — because this is a boot path that is tuned hard. UplinkModel::start()
+    // does all of that, and is deferred to the first presented frame below.
+    CloudConfig cloudConfig;
+    MosquittoCloudClient cloudClient(&cloudConfig);
+    UplinkModel uplinkModel(&dataModel, &raceBoxModel, &trackModel,
+                            &cloudConfig, &cloudClient);
+
+    // The dash owns the session lifecycle, reusing the signals it already has
+    // rather than inventing a second notion of "a run" — so the cloud's session
+    // list agrees with what the driver saw on screen.
+    QObject::connect(&raceBoxModel, &RaceBoxModel::lapTimerStateChanged,
+                     &uplinkModel, &UplinkModel::onLapTimerStateChanged);
+    QObject::connect(&sessionModel, &SessionModel::sessionSaved,
+                     &uplinkModel, &UplinkModel::onSessionSaved);
+    // Same signal SessionModel listens to, wired in parallel: the stop event's
+    // lap list is then built from the same source as the on-screen times.
+    QObject::connect(&raceBoxModel, &RaceBoxModel::lapCompleted,
+                     &uplinkModel, &UplinkModel::onLapCompleted);
+
     QQmlApplicationEngine engine;
     engine.rootContext()->setContextProperty("dashConfig",       &dashConfig);
     engine.rootContext()->setContextProperty("dataModel",       &dataModel);
@@ -141,6 +171,8 @@ int main(int argc, char *argv[])
     engine.rootContext()->setContextProperty("displayModel",    &displayModel);
     engine.rootContext()->setContextProperty("networkModel",    &networkModel);
     engine.rootContext()->setContextProperty("logBuffer",       &logBuffer);
+    engine.rootContext()->setContextProperty("uplinkModel",     &uplinkModel);
+    engine.rootContext()->setContextProperty("cloudConfig",     &cloudConfig);
     engine.rootContext()->setContextProperty("kioskMode",       kioskMode);
     engine.load(QUrl(QStringLiteral("qrc:/qml/main.qml")));
 
@@ -158,12 +190,28 @@ int main(int argc, char *argv[])
     // touches a plain OS socket and is safe to call from any thread.
     // Qt::SingleShotConnection (Qt 6.0+) disconnects after the first emission —
     // we only need this once per run.
-    if (auto *window = qobject_cast<QQuickWindow *>(engine.rootObjects().constFirst()))
+    // The uplink starts off the same hook, for the same reason: opening the
+    // spool is SD-card I/O and connecting is a DNS lookup plus a TLS handshake,
+    // and neither may sit between boot and the first frame on screen. Hooking
+    // sdNotifyReady's signal rather than adding a timer keeps "nothing on the
+    // uplink path runs before the dashboard is visible" true by construction.
+    //
+    // Queued, not direct: frameSwapped is emitted on the render thread, and
+    // unlike sdNotifyReady (which only writes to an OS socket) UplinkModel is
+    // main-thread state.
+    const auto startUplink = [&uplinkModel] { uplinkModel.start(); };
+
+    if (auto *window = qobject_cast<QQuickWindow *>(engine.rootObjects().constFirst())) {
         QObject::connect(window, &QQuickWindow::frameSwapped, window,
                           &sdNotifyReady, Qt::SingleShotConnection);
-    else
+        QObject::connect(window, &QQuickWindow::frameSwapped, &uplinkModel,
+                          startUplink,
+                          Qt::ConnectionType(Qt::QueuedConnection | Qt::SingleShotConnection));
+    } else {
         sdNotifyReady(); // no window to hook (shouldn't happen) — notify anyway so
                          // systemd doesn't wait out the full start timeout for nothing
+        startUplink();
+    }
 
     canProvider->start();
     raceBoxProvider->start();

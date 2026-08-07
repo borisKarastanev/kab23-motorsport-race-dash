@@ -29,6 +29,7 @@ Item {
     Component { id: compDeviceStats;    DeviceStats {} }
     Component { id: compDeviceLog;      DeviceLog {} }
     Component { id: compDisplay;        DisplaySettings {} }
+    Component { id: compCloudUplink;    CloudUplinkDetail {} }
 
     function registryFor(key) {
         switch (key) {
@@ -47,6 +48,7 @@ Item {
             case "device-stats":    return compDeviceStats
             case "device-log":      return compDeviceLog
             case "display":         return compDisplay
+            case "cloud-uplink":    return compCloudUplink
             default:                return compLayout
         }
     }
