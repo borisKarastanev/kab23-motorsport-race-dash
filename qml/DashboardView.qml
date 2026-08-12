@@ -7,6 +7,40 @@ Item {
 
     signal openSettingsRequested()
 
+    // False while the dashboard is swiped away, so infinite alert animations
+    // don't keep forcing repaints behind the Settings page. Defaults true so
+    // the view still animates when used standalone (tests, previews).
+    property bool onScreen: true
+
+    // ── cold-oil RPM limiter reduction ────────────────────────
+    // While oil is cold the oil gauge shows a pulsing warning and the LED
+    // shift-light strip's thresholds are scaled down to coldOilLimiterRpm —
+    // purely a visual/UI reduction (this dash reads CAN, it doesn't control
+    // the ECU). dashConfig.limiterRpm/pairXRpm are never written here, so
+    // the strip returns to exactly the user-configured default the instant
+    // oil temp reaches oilColdWarningTemp, with nothing persisted in between.
+    //
+    // Single threshold, no deadband: the warning clears the moment the reading
+    // reaches oilColdWarningTemp. A split enter/clear pair was tried to damp
+    // possible 1 °C LSB chatter at the boundary, but it delayed the all-clear
+    // past the temperature the driver is actually watching for, which is worse
+    // than the flicker it guarded against. If real-world chatter ever shows up,
+    // damp it at the signal (a filter in CanDataModel), not by moving this.
+    readonly property real oilColdWarningTemp: 60
+    readonly property int  coldOilLimiterRpm:  5250
+
+    // Gated on oilTempSeen: oilTemp's 0.0 default would otherwise read as
+    // "cold" before the first 0x545 frame, and stay that way forever on a
+    // car/DME that never sends one.
+    readonly property bool oilCold: dataModel.oilTempSeen
+                                    && dataModel.oilTemp < oilColdWarningTemp
+
+    // Never scale above the user's actual configured limiter, in case they've
+    // set it below coldOilLimiterRpm already.
+    readonly property real limiterScale: oilCold
+        ? Math.min(coldOilLimiterRpm, dashConfig.limiterRpm) / dashConfig.limiterRpm
+        : 1.0
+
     // ── right-edge swipe → settings ──────────────────────────
     // 40 px strip along the right edge. DragHandler sits above the ColumnLayout
     // in the item tree so it intercepts horizontal drags without blocking taps
@@ -125,6 +159,7 @@ Item {
             decimalPlaces: 1
             warningThreshold: dashConfig.coolantWarningTemp
             dangerThreshold: dashConfig.coolantDangerTemp
+            pulseEnabled: dashboardRoot.onScreen
         }
     }
 
@@ -140,6 +175,9 @@ Item {
             decimalPlaces: 1
             warningThreshold: dashConfig.oilWarningTemp
             dangerThreshold: dashConfig.oilDangerTemp
+            lowWarningEnabled: dataModel.oilTempSeen
+            lowWarningThreshold: dashboardRoot.oilColdWarningTemp
+            pulseEnabled: dashboardRoot.onScreen
         }
     }
 
@@ -175,6 +213,7 @@ Item {
             pair3Rpm:        dashConfig.pair3Rpm
             pair4Rpm:        dashConfig.pair4Rpm
             allBlueRpm:      dashConfig.allBlueRpm
+            limiterScale:    dashboardRoot.limiterScale
         }
 
         RowLayout {

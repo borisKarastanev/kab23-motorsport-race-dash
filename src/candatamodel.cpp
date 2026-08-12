@@ -39,6 +39,10 @@ void CanDataModel::onFrame(const QCanBusFrame &frame)
         if (p.size() >= CanScaling::kOffsetOilTemp + 1) {
             m_oilTemp = CanScaling::decodeOilTemp(static_cast<quint8>(p[CanScaling::kOffsetOilTemp]));
             m_dirty |= kDirtyOilTemp;
+            if (!m_oilTempSeen) {
+                m_oilTempSeen = true;
+                m_dirty |= kDirtyOilSeen;
+            }
         }
         break;
 
@@ -62,6 +66,7 @@ void CanDataModel::emitNotifications()
 
     if (dirty & kDirtyCoolant) emit coolantTempChanged();
     if (dirty & kDirtyOilTemp) emit oilTempChanged();
+    if (dirty & kDirtyOilSeen) emit oilTempSeenChanged();
     if (dirty & kDirtySpeed)   emit speedChanged();
     if (dirty & kDirtyGear)    emit gearChanged();
 }

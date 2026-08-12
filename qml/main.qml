@@ -17,6 +17,9 @@ Window {
 
         DashboardView {
             id: dashboardView
+            // SwipeView keeps a non-current page `visible`, so the dashboard
+            // can't detect being swiped away on its own.
+            onScreen: rootSwipe.currentIndex === 0
             onOpenSettingsRequested: rootSwipe.currentIndex = 1
         }
 

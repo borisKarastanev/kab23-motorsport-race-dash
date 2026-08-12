@@ -44,6 +44,7 @@ private slots:
     void shortPayloadIgnored();
     void coolantAndOilDecodeAndBatch();
     void setSpeedBatchedByNotifyTimer();
+    void oilTempNotSeenUntilFirstDme4Frame();
 };
 
 void TestCanDataModel::rpmDecodesAndEmitsImmediately()
@@ -133,6 +134,37 @@ void TestCanDataModel::setSpeedBatchedByNotifyTimer()
     QCOMPARE(spy.count(), 0);
     QTRY_COMPARE_WITH_TIMEOUT(spy.count(), 1, 500);
     QCOMPARE(model.speed(), 120);
+}
+
+void TestCanDataModel::oilTempNotSeenUntilFirstDme4Frame()
+{
+    CanDataModel model;
+    QSignalSpy seenSpy(&model, &CanDataModel::oilTempSeenChanged);
+
+    // oilTemp()'s 0.0 default must not read as a real 0 °C measurement —
+    // consumers key the cold-oil limiter reduction off this flag.
+    QVERIFY(!model.oilTempSeen());
+
+    // Unrelated traffic must not set it.
+    model.onFrame(rpmFrame(3000));
+    model.onFrame(coolantFrame(90.0));
+    QVERIFY(!model.oilTempSeen());
+
+    // A too-short DME4 payload is ignored, so it must not set it either.
+    model.onFrame(QCanBusFrame(CanScaling::kFrameDme4, QByteArray(2, 0)));
+    QVERIFY(!model.oilTempSeen());
+
+    model.onFrame(oilTempFrame(35.0));
+    QTRY_COMPARE_WITH_TIMEOUT(seenSpy.count(), 1, 500);
+    QVERIFY(model.oilTempSeen());
+
+    // Latches once true, and doesn't re-notify on subsequent frames. The temp
+    // itself is assigned synchronously in onFrame (only the notification is
+    // batched), so this needs no QTRY_ retry loop.
+    model.onFrame(oilTempFrame(80.0));
+    QVERIFY(std::abs(model.oilTemp() - 80.0) < 1e-9);
+    QTest::qWait(200); // let a notify tick elapse — still no second signal
+    QCOMPARE(seenSpy.count(), 1);
 }
 
 QTEST_GUILESS_MAIN(TestCanDataModel)

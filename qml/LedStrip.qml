@@ -16,11 +16,21 @@ Item {
     property int pair4Rpm:   6600
     property int allBlueRpm: 6750
 
+    // Renders as if the limiter were this fraction of the configured one, so a
+    // temporary derate (cold oil) can move every shift point at once without
+    // rewriting — or persisting — the user's configured thresholds. Applied
+    // here rather than at the call site so the "thresholds scale with the
+    // limiter" rule stays in one place and callers pass one number, not six.
+    // 1.0 = exactly as configured.
+    property real limiterScale: 1.0
+
     readonly property var pairThresholds: [pair0Rpm, pair1Rpm, pair2Rpm, pair3Rpm, pair4Rpm]
+                                          .map(v => Math.round(v * limiterScale))
+    readonly property int scaledAllBlueRpm: Math.round(allBlueRpm * limiterScale)
     readonly property var pairBaseColors: ["#00dd44", "#00dd44", "#ffcc00", "#ffcc00", "#ff2200"]
 
-    readonly property bool isAllBlue:        rpm >= allBlueRpm
-    readonly property bool isCenterFlashing: rpm >= pair4Rpm
+    readonly property bool isAllBlue:        rpm >= scaledAllBlueRpm
+    readonly property bool isCenterFlashing: rpm >= pairThresholds[4]
 
     property real flashAlpha: 1.0
 

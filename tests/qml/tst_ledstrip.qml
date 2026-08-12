@@ -80,6 +80,48 @@ TestCase {
         }
     }
 
+    // limiterScale renders the strip as if the limiter were a fraction of the
+    // configured one (cold-oil derate), without touching the stored thresholds.
+    function test_limiterScaleLowersThresholds() {
+        const strip = createTemporaryObject(stripComp, null, {
+            ledCount: 10, rpm: 5000,
+            pair0Rpm: 5800, pair1Rpm: 6000, pair2Rpm: 6200, pair3Rpm: 6500,
+            pair4Rpm: 6600, allBlueRpm: 6750
+        })
+        // 5000 RPM clears nothing at the configured limiter.
+        compare(strip.pairThresholds[0], 5800)
+        let litCount = 0
+        const unscaled = ledItems(strip)
+        for (let i = 0; i < unscaled.length; i++)
+            if (unscaled[i].lit) litCount++
+        compare(litCount, 0)
+
+        // Derated to ~77% (5250/6800), pair0 drops to 4478 so 5000 now lights it.
+        strip.limiterScale = 5250 / 6800
+        compare(strip.pairThresholds[0], Math.round(5800 * 5250 / 6800))
+        litCount = 0
+        const scaled = ledItems(strip)
+        for (let i = 0; i < scaled.length; i++)
+            if (scaled[i].lit) litCount++
+        verify(litCount > 0)
+
+        // The configured values themselves are untouched.
+        compare(strip.pair0Rpm, 5800)
+        compare(strip.allBlueRpm, 6750)
+    }
+
+    function test_limiterScaleAffectsAllBlueAndCenterFlash() {
+        const strip = createTemporaryObject(stripComp, null, {
+            ledCount: 10, rpm: 5300,
+            pair0Rpm: 5800, pair1Rpm: 6000, pair2Rpm: 6200, pair3Rpm: 6500,
+            pair4Rpm: 6600, allBlueRpm: 6750, limiterScale: 5250 / 6800
+        })
+        // allBlue scales to 5211 and pair4 to 5096, so 5300 clears both.
+        compare(strip.scaledAllBlueRpm, Math.round(6750 * 5250 / 6800))
+        compare(strip.isAllBlue, true)
+        compare(strip.isCenterFlashing, true)
+    }
+
     function test_centerFlashBelowAllBlue() {
         const strip = createTemporaryObject(stripComp, null, {
             ledCount: 10, rpm: 6650,
