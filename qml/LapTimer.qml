@@ -59,7 +59,7 @@ Rectangle {
             Text {
                 text: Fmt.formatMs(raceBoxModel.currentLapMs)
                 color: "#ffffff"
-                font.pixelSize: 22
+                font.pixelSize: 24
                 font.bold: true
                 font.family: "monospace"
             }
@@ -70,7 +70,7 @@ Rectangle {
                 visible: raceBoxModel.bestLapMs > 0
                 text: formatDelta(raceBoxModel.currentDeltaMs)
                 color: raceBoxModel.currentDeltaMs <= 0 ? "#00cc44" : "#cc2222"
-                font.pixelSize: 16
+                font.pixelSize: 18
                 font.bold: true
                 font.family: "monospace"
             }
@@ -93,7 +93,7 @@ Rectangle {
                         return "#00cc44"
                     return "#cc2222"
                 }
-                font.pixelSize: 18
+                font.pixelSize: 20
                 font.bold: true
                 font.family: "monospace"
             }
@@ -112,7 +112,7 @@ Rectangle {
             Text {
                 text: Fmt.formatMs(raceBoxModel.bestLapMs)
                 color: raceBoxModel.bestLapMs > 0 ? "#00cc44" : "#555555"
-                font.pixelSize: 18
+                font.pixelSize: 20
                 font.bold: true
                 font.family: "monospace"
             }
@@ -134,7 +134,7 @@ Rectangle {
             anchors.centerIn: parent
             text: "CROSS S/F LINE\nTO START TIMER"
             color: "#558855"
-            font.pixelSize: 12
+            font.pixelSize: 14
             font.family: "monospace"
             font.letterSpacing: 2
             horizontalAlignment: Text.AlignHCenter
