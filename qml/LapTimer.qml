@@ -102,6 +102,7 @@ Rectangle {
         // ── bottom-right: best lap ─────────────────────────────
         ColumnLayout {
             Layout.fillWidth: true
+            Layout.leftMargin: 12
             spacing: 1
             Text {
                 text: "BEST ★"
