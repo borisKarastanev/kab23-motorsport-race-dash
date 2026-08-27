@@ -8,6 +8,30 @@
 #include <QVector>
 #include <QList>
 
+// One completed lap, reported the instant it finishes — see
+// RaceBoxModel::lapCompleted() below. Declared at file scope rather than
+// nested in RaceBoxModel: moc doesn't support a meta-object type (Q_GADGET or
+// Q_OBJECT) nested inside another. A Q_GADGET rather than a plain struct so it
+// can carry Q_PROPERTYs for the two fields a future QML consumer would
+// plausibly want; path and sectorMs are bulk C++-only data with no such need
+// today.
+struct RaceBoxLapResult {
+    Q_GADGET
+    Q_PROPERTY(int lapNumber MEMBER lapNumber)
+    Q_PROPERTY(qint64 ms MEMBER ms)
+public:
+    // RaceBoxModel's own lap counter as this lap finished — the number the
+    // driver saw on the dash. NOT a session-unique identity: clearFinishLine()
+    // resets it to 0 mid-run, so a consumer that files laps under it can end up
+    // with two different laps sharing one number. Anything needing a stable
+    // per-session number must assign its own (see SessionModel::LapRecord).
+    int           lapNumber = 0;
+    qint64        ms        = 0;
+    QVariantList  path;            // flat [lat, lon, lat, lon, …]
+    QList<qint64> sectorMs;        // exactly sectorCount entries, or empty if a gate was missed
+};
+Q_DECLARE_METATYPE(RaceBoxLapResult)
+
 class RaceBoxModel : public QObject {
     Q_OBJECT
 public:
@@ -149,16 +173,14 @@ signals:
     void finishLineLearned(double latA, double lonA, double latB, double lonB);
     // Emitted to feed CanDataModel
     void speedKmhChanged(int kmh);
-    // Emitted immediately when a lap completes — not throttled, safe for persistence.
-    // path is a flat [lat, lon, lat, lon, …] list of the GPS fixes recorded during the lap.
-    void lapCompleted(qint64 ms, const QVariantList &path);
-    // Emitted immediately alongside lapCompleted, for the lap that just finished.
-    // sectorMs has exactly as many entries as sector gates exist (S1, S2, S3, in
-    // order) when every gate was crossed during the lap; empty when one was
-    // missed — never a partial list, so a caller (SessionModel) can treat "the
-    // right length" as the sole eligibility test, per the shared optimal-lap
-    // rule (~/development/optimal-lap-algorithm.md).
-    void lapSectorsCompleted(const QList<qint64> &sectorMs);
+    // Emitted immediately when a lap completes — not throttled, safe for
+    // persistence. One event, one signal: lapNumber, the finished lap's own
+    // time/path, and its sector splits (sectorMs — exactly as many entries as
+    // sector gates exist, S1/S2/S3 in order, when every gate was crossed;
+    // empty when one was missed, per the shared optimal-lap rule,
+    // ~/development/optimal-lap-algorithm.md) all travel together, so a caller
+    // can never receive one half without the other.
+    void lapCompleted(const RaceBoxLapResult &lap);
     // Emitted when the sector gates are (re)derived from a completed lap, or
     // cleared (empty list) — a new finish line makes any prior gate geometry
     // meaningless. TrackModel listens, to persist them per track the same way

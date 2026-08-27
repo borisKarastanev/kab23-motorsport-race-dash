@@ -7,7 +7,6 @@
 #include <QJsonDocument>
 #include <QJsonArray>
 #include <QJsonObject>
-#include <QMetaObject>
 
 #include "src/sessionmodel.h"
 #include "src/candatamodel.h"
@@ -114,13 +113,16 @@ QVariantList fourSectorLoopGates()
     };
 }
 
-void driveFullLoopLap(RaceBoxModel &model)
+// stepWaitMs sets the lap's pace: every fix costs real wall-clock time, so a
+// shorter wait is a genuinely faster lap. The default 4 steps x 5 legs x 200 ms
+// is a ~4 s lap, comfortably clear of RaceBoxModel's 3 s minimum-lap debounce.
+void driveFullLoopLap(RaceBoxModel &model, int stepWaitMs = 200)
 {
-    driveTo(model, kLoopCrossLat, kLoopCrossLon, kLoopNELat, kLoopNELon, 4, 200);
-    driveTo(model, kLoopNELat, kLoopNELon, kLoopNWLat, kLoopNWLon, 4, 200);
-    driveTo(model, kLoopNWLat, kLoopNWLon, kLoopSWLat, kLoopSWLon, 4, 200);
-    driveTo(model, kLoopSWLat, kLoopSWLon, kLoopSELat, kLoopSELon, 4, 200);
-    driveTo(model, kLoopSELat, kLoopSELon, kLoopCrossLat, kLoopCrossLon, 4, 200);
+    driveTo(model, kLoopCrossLat, kLoopCrossLon, kLoopNELat, kLoopNELon, 4, stepWaitMs);
+    driveTo(model, kLoopNELat, kLoopNELon, kLoopNWLat, kLoopNWLon, 4, stepWaitMs);
+    driveTo(model, kLoopNWLat, kLoopNWLon, kLoopSWLat, kLoopSWLon, 4, stepWaitMs);
+    driveTo(model, kLoopSWLat, kLoopSWLon, kLoopSELat, kLoopSELon, 4, stepWaitMs);
+    driveTo(model, kLoopSELat, kLoopSELon, kLoopCrossLat, kLoopCrossLon, 4, stepWaitMs);
 }
 
 }
@@ -146,7 +148,7 @@ private slots:
     void savedSessionCarriesOptimalLapOnceTwoLapsHaveSplits();
     void savedSessionHasNoOptimalLapWithFewerThanTwoEligibleLaps();
     void optimalLapFollowsTheSessionsActualSectorCount();
-    void sectorSplitsWithoutAMatchingLapAreDiscarded();
+    void lapNumbersStayUniqueWhenTheFinishLineIsClearedMidSession();
 };
 
 void TestSessionModel::initTestCase()
@@ -374,7 +376,7 @@ void TestSessionModel::optimalLapFollowsTheSessionsActualSectorCount()
     QVERIFY(saved.value("optimalLapMs").toLongLong() > 0);
 }
 
-void TestSessionModel::sectorSplitsWithoutAMatchingLapAreDiscarded()
+void TestSessionModel::lapNumbersStayUniqueWhenTheFinishLineIsClearedMidSession()
 {
     CanDataModel canModel;
     RaceBoxModel raceBox;
@@ -384,36 +386,40 @@ void TestSessionModel::sectorSplitsWithoutAMatchingLapAreDiscarded()
     raceBox.setFinishLine(kGateLat, kGateLonA, kGateLat, kGateLonB);
     raceBox.onData(makeFix(50.9998, 0.0));
     QTest::qWait(40);
-    raceBox.onData(makeFix(kLoopCrossLat, kLoopCrossLon));
+    raceBox.onData(makeFix(kLoopCrossLat, kLoopCrossLon)); // arms lap 1
 
-    driveFullLoopLap(raceBox); // lap 1 — derives the gates
-    driveFullLoopLap(raceBox); // lap 2 — splits
-    driveFullLoopLap(raceBox); // lap 3 — splits
+    driveFullLoopLap(raceBox); // session lap 1 — derives gates, no splits of its own
 
-    // A lapSectorsCompleted with no lapCompleted to pair with — what a rejected
-    // lap time (onLapCompleted's ms <= 0 guard), or a second emitter of
-    // lapCompleted, would produce. Appending it would push the two parallel
-    // lists out of step, and since a lap's *number* is its 1-based index into
-    // them, every later lap's splits would be filed under the wrong lap.
-    // Invoked through the meta-object system, which reaches the private slot
-    // exactly as a signal connection does.
-    const QList<qint64> stray{1, 1, 1};
-    QVERIFY(QMetaObject::invokeMethod(&sessions, "onLapSectorsCompleted",
-                                      Q_ARG(QList<qint64>, stray)));
+    // The driver re-learns the finish line mid-session (the CONFIRM button on
+    // DashboardView's clear-finish-line overlay). RaceBoxModel resets its own
+    // lap counter to 0 here and drops its sector gates — but the lap already
+    // banked above stays in the session, so from here on RaceBoxModel's
+    // numbering and the session's diverge.
+    raceBox.clearFinishLine();
+    raceBox.setFinishLine(kGateLat, kGateLonA, kGateLat, kGateLonB);
+
+    driveFullLoopLap(raceBox);      // re-arms on its closing crossing — completes no lap
+    driveFullLoopLap(raceBox);      // session lap 2 — derives gates afresh, no splits
+    driveFullLoopLap(raceBox);      // session lap 3 — eligible
+    driveFullLoopLap(raceBox, 170); // session lap 4 — eligible, and clearly the fastest
 
     sessions.saveCurrentSession();
 
-    // The stray list is implausibly fast, so had it been accepted it would have
-    // won every sector and produced a 3 ms optimal lap.
     const QVariantMap saved = sessions.sessions().first().toMap();
+    const QVariantList lapMs = saved.value("lapMs").toList();
+    QCOMPARE(lapMs.size(), 4);
+
+    // Lap 4 is ~600 ms faster than lap 3, so it wins every sector outright.
+    // Were the record's number taken from RaceBoxLapResult::lapNumber, the
+    // clear above would have restarted the count and filed this lap as 3 —
+    // the same number as the genuinely different lap recorded before it.
     const QVariantList sectors = saved.value("optimalSectors").toList();
     QCOMPARE(sectors.size(), 3);
-    QVERIFY(saved.value("optimalLapMs").toLongLong() > 1000);
-    for (const QVariant &v : sectors) {
-        const QVariantMap m = v.toMap();
-        QVERIFY(m.value("sectorMs").toLongLong() > 1);
-        QVERIFY(m.value("lapNumber").toInt() <= 3); // never a phantom lap 4
-    }
+    for (const QVariant &v : sectors)
+        QCOMPARE(v.toMap().value("lapNumber").toInt(), 4);
+
+    // Every sector coming from lap 4 makes the optimal lap exactly lap 4.
+    QCOMPARE(saved.value("optimalLapMs").toLongLong(), lapMs.at(3).toLongLong());
 }
 
 QTEST_GUILESS_MAIN(TestSessionModel)

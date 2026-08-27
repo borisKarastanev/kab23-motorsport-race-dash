@@ -4,8 +4,9 @@
 #include <QVariantList>
 #include <QList>
 
+#include "raceboxmodel.h"
+
 class CanDataModel;
-class RaceBoxModel;
 class TrackModel;
 
 class SessionModel : public QObject {
@@ -23,7 +24,7 @@ public:
     // Sessions bucketed by track (untagged sessions fall into "Unknown"),
     // newest-first. Cached; rebuilt only when m_sessions changes.
     const QVariantList &sessionGroups() const { return m_sessionGroups; }
-    bool hasLaps() const { return !m_currentLapTimes.isEmpty(); }
+    bool hasLaps() const { return !m_currentLaps.isEmpty(); }
     // A session may be saved only when laps have been recorded and the car is
     // stationary (or crawling) — owns the has-laps + speed-threshold policy so
     // the view just binds a single flag.
@@ -48,8 +49,7 @@ signals:
     void sessionSaved();
 
 private slots:
-    void onLapCompleted(qint64 ms, const QVariantList &path);
-    void onLapSectorsCompleted(const QList<qint64> &sectorMs);
+    void onLapCompleted(const RaceBoxLapResult &lap);
     void onSpeedChanged();
     void onOilTempChanged();
     void onCoolantTempChanged();
@@ -68,18 +68,28 @@ private:
     QVariantList   m_sessions;
     QVariantList   m_sessionGroups; // cached grouping of m_sessions, rebuilt on change
 
-    QList<qint64>       m_currentLapTimes;
-    QList<QVariantList> m_currentLapPaths;
-    // Parallel to m_currentLapTimes: lap i's sector splits, or an empty list if
-    // lap i missed a sector gate. Lap *number* for OptimalLap::SectoredLap is
-    // this list's 1-based index — it resets to empty in lockstep with
-    // m_currentLapTimes (both driven by the same pair of RaceBoxModel signals
-    // for the same completed lap), so the two indices always agree with
-    // RaceBoxModel's own m_lapNumber for the laps recorded so far this session.
+    // One record per completed lap this session, in arrival order.
+    //
+    // lapNumber is assigned *here*, 1-based over this list, deliberately rather
+    // than taken from RaceBoxLapResult::lapNumber. The two agree on every path
+    // but one: clearFinishLine() resets RaceBoxModel's counter to 0 mid-session
+    // (resetLapState()) without clearing this list, so a driver who re-learns
+    // the line mid-run would otherwise bank laps numbered 1,2,3,1,2,3,4. That
+    // ambiguity reaches the saved record — OptimalLap::compute() treats
+    // lapNumber as an identity, both in its tie-break and in matchesLapNumber —
+    // so the number a session files a lap under has to be the session's own,
+    // monotonic and unique within it, not the lap timer's.
+    //
     // Read only at save time (see saveCurrentSession()) — the optimal lap is a
     // property of a *completed* session, shown in the Sessions view, not a
     // live dashboard readout.
-    QList<QList<qint64>> m_currentLapSectorTimes;
+    struct LapRecord {
+        int           lapNumber = 0;
+        qint64        ms        = 0;
+        QVariantList  path;
+        QList<qint64> sectorMs;
+    };
+    QList<LapRecord> m_currentLaps;
     int            m_topSpeedKmh = 0;
     double         m_maxOilC     = 0.0;
     double         m_maxCoolantC = 0.0;

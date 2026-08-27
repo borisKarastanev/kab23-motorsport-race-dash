@@ -14,8 +14,9 @@ namespace OptimalLap {
 
 // One lap's per-sector times, as recorded by RaceBoxModel's gate detector.
 // sectorMs is either exactly sectorCount long (every gate crossed) or empty
-// (one was missed) — RaceBoxModel::lapSectorsCompleted never emits a partial
-// list, and eligibility below relies on that.
+// (one was missed) — RaceBoxLapResult::sectorMs, carried by
+// RaceBoxModel::lapCompleted, is never a partial list, and eligibility below
+// relies on that.
 struct SectoredLap {
     int           lapNumber = 0;
     QList<qint64> sectorMs;

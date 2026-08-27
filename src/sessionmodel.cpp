@@ -33,8 +33,6 @@ SessionModel::SessionModel(CanDataModel *canModel, RaceBoxModel *raceBoxModel,
 {
     connect(m_raceBoxModel, &RaceBoxModel::lapCompleted,
             this, &SessionModel::onLapCompleted);
-    connect(m_raceBoxModel, &RaceBoxModel::lapSectorsCompleted,
-            this, &SessionModel::onLapSectorsCompleted);
     connect(m_canModel, &CanDataModel::speedChanged,
             this, &SessionModel::onSpeedChanged);
     connect(m_canModel, &CanDataModel::oilTempChanged,
@@ -45,39 +43,18 @@ SessionModel::SessionModel(CanDataModel *canModel, RaceBoxModel *raceBoxModel,
     load();
 }
 
-void SessionModel::onLapCompleted(qint64 ms, const QVariantList &path)
+void SessionModel::onLapCompleted(const RaceBoxLapResult &lap)
 {
-    if (ms <= 0)
+    if (lap.ms <= 0)
         return;
-    const bool wasEmpty = m_currentLapTimes.isEmpty();
-    m_currentLapTimes.append(ms);
-    m_currentLapPaths.append(path);
-    qCInfo(lcApp) << "[SessionModel] lap appended —" << ms << "ms | total laps:" << m_currentLapTimes.size();
+    const bool wasEmpty = m_currentLaps.isEmpty();
+    // Numbered by this session, not by lap.lapNumber — see LapRecord.
+    m_currentLaps.append({m_currentLaps.size() + 1, lap.ms, lap.path, lap.sectorMs});
+    qCInfo(lcApp) << "[SessionModel] lap appended —" << lap.ms << "ms | total laps:" << m_currentLaps.size();
     if (wasEmpty) {
         emit hasLapsChanged();
         updateCanSave();
     }
-}
-
-void SessionModel::onLapSectorsCompleted(const QList<qint64> &sectorMs)
-{
-    // Emitted by RaceBoxModel immediately alongside lapCompleted, for the same
-    // lap, so this list's size always tracks m_currentLapTimes's. Read only at
-    // save time (see saveCurrentSession()) — nothing needs it live.
-    //
-    // Enforce that pairing rather than assume it: onLapCompleted() rejects
-    // non-positive lap times, and nothing stops a future emitter of
-    // lapCompleted from doing likewise. An unpaired append here would shift
-    // every later lap's splits onto the wrong lap number (the 1-based index
-    // into this list *is* the lap number, see saveCurrentSession()) silently,
-    // with no assertion to reveal it.
-    if (m_currentLapSectorTimes.size() >= m_currentLapTimes.size()) {
-        qCWarning(lcApp) << "[SessionModel] sector splits with no matching lap — discarding"
-                         << "| laps:" << m_currentLapTimes.size()
-                         << "| split lists:" << m_currentLapSectorTimes.size();
-        return;
-    }
-    m_currentLapSectorTimes.append(sectorMs);
 }
 
 void SessionModel::onSpeedChanged()
@@ -113,19 +90,19 @@ void SessionModel::onCoolantTempChanged()
 
 void SessionModel::saveCurrentSession()
 {
-    if (m_currentLapTimes.isEmpty())
+    if (m_currentLaps.isEmpty())
         return;
 
     const QDateTime now = QDateTime::currentDateTime();
 
     QJsonArray lapArray;
-    for (qint64 ms : m_currentLapTimes)
-        lapArray.append(ms);
+    for (const LapRecord &lap : m_currentLaps)
+        lapArray.append(lap.ms);
 
     QJsonArray pathsArray;
-    for (const QVariantList &path : m_currentLapPaths) {
+    for (const LapRecord &lap : m_currentLaps) {
         QJsonArray pointArray;
-        for (const QVariant &v : path)
+        for (const QVariant &v : lap.path)
             pointArray.append(v.toDouble());
         pathsArray.append(pointArray);
     }
@@ -137,17 +114,17 @@ void SessionModel::saveCurrentSession()
     // set of sector splits; the Sessions view treats that the same as a
     // legacy session saved before sector gates existed.
     QList<OptimalLap::SectoredLap> sectoredLaps;
-    sectoredLaps.reserve(m_currentLapSectorTimes.size());
-    for (int i = 0; i < m_currentLapSectorTimes.size(); ++i)
-        sectoredLaps.append({i + 1, m_currentLapSectorTimes[i]});
+    sectoredLaps.reserve(m_currentLaps.size());
+    for (const LapRecord &lap : m_currentLaps)
+        sectoredLaps.append({lap.lapNumber, lap.sectorMs});
     // The sector count is a runtime property of the gates in force this session
     // (RaceBoxModel derives 2 gates → 3 sectors today, but a restored gate list
     // can be any length), so read it off the laps themselves rather than
     // leaning on compute()'s default. Hard-coding 3 against a 4-sector track
     // would make every lap ineligible and silently drop the optimal lap.
     int sectorCount = 0;
-    for (const QList<qint64> &splits : m_currentLapSectorTimes) {
-        if (!splits.isEmpty()) { sectorCount = splits.size(); break; }
+    for (const LapRecord &lap : m_currentLaps) {
+        if (!lap.sectorMs.isEmpty()) { sectorCount = lap.sectorMs.size(); break; }
     }
     const std::optional<OptimalLap::Result> optimal =
         OptimalLap::compute(sectoredLaps, sectorCount);
@@ -188,9 +165,7 @@ void SessionModel::saveCurrentSession()
     // The g-force peaks live in RaceBoxModel (it sees raw un-throttled samples)
     // but are reset here, alongside our own accumulators, so every session-peak
     // stat clears at the same point in the save.
-    m_currentLapTimes.clear();
-    m_currentLapPaths.clear();
-    m_currentLapSectorTimes.clear();
+    m_currentLaps.clear();
     m_topSpeedKmh = 0;
     m_maxOilC     = 0.0;
     m_maxCoolantC = 0.0;
