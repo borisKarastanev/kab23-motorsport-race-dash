@@ -141,11 +141,14 @@ Rectangle {
         // offering a tap that would silently do nothing. "Has a fix but still can't
         // learn" means the heading is the missing half, so prompt the driver to move.
         Rectangle {
-            // NOTE: temporarily left enabled even for tracks with a confirmed
-            // "start" DB line (see trackmodel.cpp/data/track-db.json) so this
-            // can be tested on-track. Re-add
-            // `visible: !trackModel.activeTrackFinishLineLocked` once verified,
-            // to stop users from overwriting a confirmed line.
+            // Hidden for tracks whose S/F line is a confirmed gate baked into
+            // the track DB (see trackmodel.cpp / data/track-db.json): that line
+            // is surveyed, not the driver's to move, and TrackModel refuses to
+            // store a learned one against it anyway. Hiding the control rather
+            // than disabling it keeps the bar from offering a tap that would be
+            // silently rejected. A RowLayout drops invisible items, so the row
+            // closes up on its own.
+            visible: !trackModel.activeTrackFinishLineLocked
             height: 20
             width: finishLineLabel.width + 16
             color: mouseArea.pressed ? "#1a2a1a" : "transparent"

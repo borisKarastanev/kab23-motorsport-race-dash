@@ -45,6 +45,34 @@ double bearingRad(double lat1, double lon1, double lat2, double lon2)
     const double x = std::cos(la1) * std::sin(la2) - std::sin(la1) * std::cos(la2) * std::cos(dLon);
     return std::atan2(y, x);
 }
+
+// Perpendicular-to-heading gate construction shared by the live finish-line
+// learn (RaceBoxModel::gateFromHeading) and the sector gates derived from a
+// completed lap's own trace (RaceBoxModel::deriveSectorGates) — same geometry,
+// two different sources of the heading.
+void perpendicularGate(double lat, double lon, double headingRad, double halfWidthM,
+                       double &latA, double &lonA, double &latB, double &lonB)
+{
+    // Travel unit vector in ENU is (sin hdg, cos hdg); its perpendicular is (cos hdg, -sin hdg).
+    const double perpE = std::cos(headingRad);
+    const double perpN = -std::sin(headingRad);
+    const double dLat = (halfWidthM * perpN) / kMetersPerDegLat;
+    const double dLon = (halfWidthM * perpE) / metersPerDegLon(lat);
+    latA = lat + dLat; lonA = lon + dLon;
+    latB = lat - dLat; lonB = lon - dLon;
+}
+
+// A derived lap shorter than this is almost certainly a false start (an early,
+// aborted crossing) rather than a real lap, and splitting it into three gates
+// only metres apart would produce sector boundaries useless on any real track.
+constexpr double kMinSectorDeriveLapDistanceM = 60.0;
+
+// How many sectors deriveSectorGates() splits a lap into — the one place the
+// dash's "three" lives. It yields kSectorCount - 1 gates at even fractions of
+// the lap's distance; everything downstream (crossing, eligibility, the optimal
+// lap) already reads the count off the gate list, so this is the only line to
+// change for a track split some other way.
+constexpr int kSectorCount = 3;
 }
 
 RaceBoxModel::RaceBoxModel(QObject *parent)
@@ -153,6 +181,25 @@ void RaceBoxModel::setFinishLine(double latA, double lonA, double latB, double l
     m_dirty |= kDirtyFinishLine;
 }
 
+void RaceBoxModel::setSectorGates(const QVariantList &gates)
+{
+    QVector<Gate> parsed;
+    parsed.reserve(gates.size());
+    for (const QVariant &v : gates) {
+        const QVariantMap m = v.toMap();
+        parsed.append({m.value("lat1").toDouble(), m.value("lon1").toDouble(),
+                       m.value("lat2").toDouble(), m.value("lon2").toDouble(),
+                       m.value("dir").toInt()}); // 0 when absent — re-latches on first crossing
+    }
+    m_sectorGates = parsed;
+    // Splits collected so far this lap were measured against the gates being
+    // replaced. Keeping them would let a lap finish with a full-length list
+    // stitched from two different tracks' gate positions — which passes the
+    // all-or-nothing eligibility test in updateLapTiming() and is reported as
+    // a valid set of sector times.
+    m_currentLapSectorMs.clear();
+}
+
 void RaceBoxModel::gateFromHeading(double lat, double lon,
                                    double &latA, double &lonA, double &latB, double &lonB) const
 {
@@ -161,13 +208,99 @@ void RaceBoxModel::gateFromHeading(double lat, double lon,
     // travel — uncrossable — so learnFinishLineHere() requires a heading before
     // calling this. The fallback here is purely defensive.
     const double hdg = m_haveHeading ? m_headingRad : 0.0;
-    // Travel unit vector in ENU is (sin hdg, cos hdg); its perpendicular is (cos hdg, -sin hdg).
-    const double perpE = std::cos(hdg);
-    const double perpN = -std::sin(hdg);
-    const double dLat = (kLearnGateHalfWidthM * perpN) / kMetersPerDegLat;
-    const double dLon = (kLearnGateHalfWidthM * perpE) / metersPerDegLon(lat);
-    latA = lat + dLat; lonA = lon + dLon;
-    latB = lat - dLat; lonB = lon - dLon;
+    perpendicularGate(lat, lon, hdg, kLearnGateHalfWidthM, latA, lonA, latB, lonB);
+}
+
+bool RaceBoxModel::testGateCrossing(const Gate &gate, double prevLat, double prevLon,
+                                    double curLat, double curLon,
+                                    double &crossFrac, int *dirSign) const
+{
+    // Cheap pre-filter — skip the crossing math when both fixes are clearly far
+    // from the gate midpoint.
+    const double midLat = (gate.latA + gate.latB) / 2.0;
+    const double midLon = (gate.lonA + gate.lonB) / 2.0;
+    if (haversineM(curLat,  curLon,  midLat, midLon) > kGatePrefilterM &&
+        haversineM(prevLat, prevLon, midLat, midLon) > kGatePrefilterM)
+        return false;
+
+    // Project everything to local metres (equirectangular around the gate
+    // midpoint): x = east, y = north.
+    const double mLon = metersPerDegLon(midLat);
+    auto ex = [&](double lon) { return (lon - midLon) * mLon; };
+    auto ny = [&](double lat) { return (lat - midLat) * kMetersPerDegLat; };
+
+    const double p0x = ex(prevLon), p0y = ny(prevLat); // path segment start (prev fix)
+    const double p1x = ex(curLon),  p1y = ny(curLat);  // path segment end   (cur fix)
+    const double ax  = ex(gate.lonA), ay = ny(gate.latA); // gate endpoint A
+    const double bx  = ex(gate.lonB), by = ny(gate.latB); // gate endpoint B
+
+    // Intersect path segment P0→P1 with gate segment A→B.
+    const double rx = p1x - p0x, ry = p1y - p0y;
+    const double sx = bx  - ax,  sy = by  - ay;
+    const double denom = rx * sy - ry * sx;
+    if (std::abs(denom) < 1e-9) return false; // parallel / degenerate — no crossing
+
+    const double t = ((ax - p0x) * sy - (ay - p0y) * sx) / denom; // fraction along the path
+    const double u = ((ax - p0x) * ry - (ay - p0y) * rx) / denom; // fraction along the gate
+    if (t < 0.0 || t > 1.0 || u < 0.0 || u > 1.0) return false;   // crossing is outside the gate width
+
+    crossFrac = t;
+    if (dirSign) *dirSign = (denom > 0.0) ? 1 : -1;
+    return true;
+}
+
+void RaceBoxModel::deriveSectorGates(const QVector<Sample> &trace)
+{
+    if (trace.size() < 3) return;
+
+    QVector<double> cumulativeM(trace.size(), 0.0);
+    for (int i = 1; i < trace.size(); ++i)
+        cumulativeM[i] = cumulativeM[i - 1]
+            + haversineM(trace[i - 1].lat, trace[i - 1].lon, trace[i].lat, trace[i].lon);
+    const double totalM = cumulativeM.last();
+    if (totalM < kMinSectorDeriveLapDistanceM) return;
+
+    QVector<Gate> gates;
+    gates.reserve(kSectorCount - 1);
+    for (int k = 1; k < kSectorCount; ++k) {
+        const double targetM = totalM * k / kSectorCount;
+        // cumulativeM is non-decreasing, so binary-search it rather than
+        // rescanning from the start for each gate.
+        const auto at = std::lower_bound(cumulativeM.cbegin(), cumulativeM.cend(), targetM);
+        const int i = std::clamp(static_cast<int>(at - cumulativeM.cbegin()) - 1,
+                                 0, static_cast<int>(trace.size()) - 2);
+
+        const double segM = cumulativeM[i + 1] - cumulativeM[i];
+        const double frac = segM > 1e-6 ? (targetM - cumulativeM[i]) / segM : 0.0;
+        const double lat = trace[i].lat + frac * (trace[i + 1].lat - trace[i].lat);
+        const double lon = trace[i].lon + frac * (trace[i + 1].lon - trace[i].lon);
+        const double hdg = bearingRad(trace[i].lat, trace[i].lon, trace[i + 1].lat, trace[i + 1].lon);
+
+        Gate g;
+        perpendicularGate(lat, lon, hdg, kLearnGateHalfWidthM, g.latA, g.lonA, g.latB, g.lonB);
+        // Latch the racing direction by testing the gate against the very trace
+        // segment it was interpolated onto: that segment necessarily crosses it,
+        // and the sign it yields is the one a forward lap will produce. Failure
+        // (degenerate segment) leaves dirSign 0, i.e. latch on first crossing.
+        double t;
+        testGateCrossing(g, trace[i].lat, trace[i].lon, trace[i + 1].lat, trace[i + 1].lon,
+                         t, &g.dirSign);
+        gates.append(g);
+    }
+    m_sectorGates = gates;
+
+    QVariantList out;
+    out.reserve(gates.size());
+    for (const Gate &g : gates) {
+        QVariantMap m;
+        m["lat1"] = g.latA; m["lon1"] = g.lonA;
+        m["lat2"] = g.latB; m["lon2"] = g.lonB;
+        m["dir"]  = g.dirSign;
+        out.append(m);
+    }
+    emit sectorGatesLearned(out);
+
+    qCInfo(lcRaceBox) << "Sector gates derived from first completed lap —" << totalM << "m total";
 }
 
 void RaceBoxModel::learnFinishLineHere()
@@ -186,6 +319,21 @@ void RaceBoxModel::learnFinishLineHere()
     qCInfo(lcRaceBox) << "Finish-line gate set at" << m_lastLat << m_lastLon
                       << "| endpoints" << latA << lonA << "->" << latB << lonB;
     emit finishLineLearned(latA, lonA, latB, lonB);
+    // The line has just been (re)defined at wherever the car was standing — any
+    // gates derived (or restored) relative to a previous definition are
+    // meaningless against it. Cleared and announced UNCONDITIONALLY, exactly as
+    // clearFinishLine() does: our own m_sectorGates being empty says only that
+    // no gates are live *here*, never that the listener holds none for this
+    // track, so guarding the signal on it would let a persisted set outlive the
+    // line it was measured from.
+    //
+    // Emitted after finishLineLearned so the listener has already re-keyed to
+    // the slot this new line belongs to (see TrackModel::onSectorGatesLearned):
+    // a track that had been borrowing the global line must not take the global
+    // slot's gates down with it on its way to owning a line of its own. Same
+    // ordering as clearFinishLine().
+    m_sectorGates.clear();
+    emit sectorGatesLearned({});
 }
 
 void RaceBoxModel::onConnectionStateChanged(bool connected)
@@ -295,39 +443,34 @@ void RaceBoxModel::updateLapTiming(double prevLat, double prevLon, double curLat
                                                  // above this and still counts)
     if (nowMs - prevMs > kMaxFixGapMs) return; // fixes too far apart in time to bridge
 
-    // Cheap pre-filter — skip the crossing math when both fixes are clearly far
-    // from the gate midpoint.
-    const double midLat = (m_gateLatA + m_gateLatB) / 2.0;
-    const double midLon = (m_gateLonA + m_gateLonB) / 2.0;
-    if (haversineM(curLat,  curLon,  midLat, midLon) > kGatePrefilterM &&
-        haversineM(prevLat, prevLon, midLat, midLon) > kGatePrefilterM)
+    // Sector gates: tested one at a time, in order, only while a lap is running,
+    // and only in the direction the gate was derived for (Gate::dirSign). They
+    // are consumed strictly in index order, so a wrong-way pass over gate N —
+    // over a return leg, the pit lane, or the far side of a hairpin the gate's
+    // 25 m span happens to reach — would swallow gate N, leave its real crossing
+    // unrecorded, and still let the lap end with a full-length list of
+    // plausible-but-wrong splits.
+    if (m_lapTimerRunning && m_currentLapSectorMs.size() < m_sectorGates.size()) {
+        Gate &gate = m_sectorGates[m_currentLapSectorMs.size()];
+        double sectorT;
+        int    sectorDir = 0;
+        if (testGateCrossing(gate, prevLat, prevLon, curLat, curLon, sectorT, &sectorDir)
+            && (gate.dirSign == 0 || sectorDir == gate.dirSign)) {
+            gate.dirSign = sectorDir; // no-op once latched; latches gates restored without one
+            const qint64 sectorCrossMs = prevMs + static_cast<qint64>(sectorT * static_cast<double>(nowMs - prevMs));
+            m_currentLapSectorMs.append(sectorCrossMs - m_lapStartMs);
+        }
+    }
+
+    const Gate finishGate{m_gateLatA, m_gateLonA, m_gateLatB, m_gateLonB};
+    double t;
+    int    dir;
+    if (!testGateCrossing(finishGate, prevLat, prevLon, curLat, curLon, t, &dir))
         return;
 
-    // Project everything to local metres (equirectangular around the gate midpoint):
-    // x = east, y = north.
-    const double mLon = metersPerDegLon(midLat);
-    auto ex = [&](double lon) { return (lon - midLon) * mLon; };
-    auto ny = [&](double lat) { return (lat - midLat) * kMetersPerDegLat; };
-
-    const double p0x = ex(prevLon), p0y = ny(prevLat); // path segment start (prev fix)
-    const double p1x = ex(curLon),  p1y = ny(curLat);  // path segment end   (cur fix)
-    const double ax  = ex(m_gateLonA), ay = ny(m_gateLatA); // gate endpoint A
-    const double bx  = ex(m_gateLonB), by = ny(m_gateLatB); // gate endpoint B
-
-    // Intersect path segment P0→P1 with gate segment A→B.
-    const double rx = p1x - p0x, ry = p1y - p0y;
-    const double sx = bx  - ax,  sy = by  - ay;
-    const double denom = rx * sy - ry * sx;
-    if (std::abs(denom) < 1e-9) return; // parallel / degenerate — no crossing
-
-    const double t = ((ax - p0x) * sy - (ay - p0y) * sx) / denom; // fraction along the path
-    const double u = ((ax - p0x) * ry - (ay - p0y) * rx) / denom; // fraction along the gate
-    if (t < 0.0 || t > 1.0 || u < 0.0 || u > 1.0) return;         // crossing is outside the gate width
-
-    // Reject wrong-way crossings. denom's sign is the side the path crosses the gate
-    // from; the first accepted crossing latches the racing direction, and later
+    // Reject wrong-way crossings. dir is the side the path crosses the gate from;
+    // the first accepted crossing latches the racing direction, and later
     // opposite-direction passes (reverse, pit-lane side of the line) are ignored.
-    const int dir = (denom > 0.0) ? 1 : -1;
     if (m_crossDirSign == 0)
         m_crossDirSign = dir;      // latch on the arming crossing
     else if (dir != m_crossDirSign)
@@ -354,11 +497,32 @@ void RaceBoxModel::updateLapTiming(double prevLat, double prevLon, double curLat
         // lookup spans the full lap right up to the line (rather than ending at
         // the last decimated point short of it and freezing the reference).
         m_currentLapTrace.append({crossLat, crossLon, lapMs});
+
+        // The first lap ever to finish with no gates yet derived becomes the
+        // dash's only source of truth for where the sector boundaries are.
+        // Every lap after this one splits at the same two places.
+        if (m_sectorGates.isEmpty())
+            deriveSectorGates(m_currentLapTrace);
+
+        // A lap reports splits only if every sector gate was actually crossed —
+        // a partial list would misattribute time between sectors, so it is all
+        // or nothing (mirrors the shared optimal-lap rule's eligibility test).
+        QList<qint64> sectorMs;
+        if (!m_sectorGates.isEmpty() && m_currentLapSectorMs.size() == m_sectorGates.size()) {
+            qint64 prevSplitMs = 0;
+            for (qint64 splitMs : m_currentLapSectorMs) {
+                sectorMs.append(splitMs - prevSplitMs);
+                prevSplitMs = splitMs;
+            }
+            sectorMs.append(lapMs - prevSplitMs);
+        }
+
         QVariantList pathList;
         pathList.reserve(m_currentLapPath.size());
         for (double v : m_currentLapPath)
             pathList.append(v);
         emit lapCompleted(lapMs, pathList);
+        emit lapSectorsCompleted(sectorMs);
         const bool newBest = (m_bestLapMs == 0 || lapMs < m_bestLapMs);
         if (newBest) {
             m_bestLapMs = lapMs;
@@ -373,7 +537,8 @@ void RaceBoxModel::updateLapTiming(double prevLat, double prevLon, double curLat
         qCInfo(lcRaceBox) << "Lap" << m_lapNumber << "completed:"
                           << lapMs / 60000 << "m"
                           << (lapMs % 60000) / 1000.0 << "s"
-                          << (newBest ? "(new best)" : "");
+                          << (newBest ? "(new best)" : "")
+                          << "| sectors:" << sectorMs;
     }
     ++m_lapNumber;
     m_dirty |= kDirtyLapNumber;
@@ -381,6 +546,7 @@ void RaceBoxModel::updateLapTiming(double prevLat, double prevLon, double curLat
     m_lapTimerRunning = true;
     m_hasStartedTiming = true; // sticky; lapTimerState() transitions handled at notify time
     m_refMatchIdx = 0;         // restart the reference nearest-point search at S/F
+    m_currentLapSectorMs.clear(); // the lap now starting has crossed no sector gates yet
     // Seed the new lap's trace with its origin exactly at the line (elapsed 0)
     // so the reference geometry/time this lap eventually provides starts at S/F
     // rather than at the first decimated point past it.
@@ -406,6 +572,7 @@ void RaceBoxModel::resetLapState()
     m_currentLapPath.clear();
     m_currentLapTrace.clear();
     m_bestLapTrace.clear();
+    m_currentLapSectorMs.clear();
     m_refMatchIdx = 0;
     m_dirty |= kDirtyLapNumber | kDirtyLastLap | kDirtyBestLap | kDirtyCurrentLap;
 }
@@ -417,8 +584,10 @@ void RaceBoxModel::clearFinishLine()
     m_gateLatA = m_gateLonA = m_gateLatB = m_gateLonB = 0.0;
     m_hasStartedTiming = false;
     m_crossDirSign     = 0;
+    m_sectorGates.clear(); // derived relative to the old gate's geometry — no longer valid
     m_dirty |= kDirtyFinishLine;
     emit finishLineLearned(0.0, 0.0, 0.0, 0.0);
+    emit sectorGatesLearned({});
     qCInfo(lcRaceBox) << "Finish line cleared";
 }
 

@@ -6,6 +6,7 @@
 #include <QElapsedTimer>
 #include <QVariantList>
 #include <QVector>
+#include <QList>
 
 class RaceBoxModel : public QObject {
     Q_OBJECT
@@ -76,6 +77,19 @@ public:
     // this segment. All-zero coordinates are treated as "unset" (no-op).
     void setFinishLine(double latA, double lonA, double latB, double lonB);
 
+    // Applies previously-derived sector gates — TrackModel calls this at
+    // startup and on track selection, mirroring setFinishLine(), so a track
+    // already timed once doesn't waste the first lap of every future session
+    // re-deriving gates it already has. Each entry is a map with keys
+    // "lat1"/"lon1"/"lat2"/"lon2" (same shape TrackModel already uses for the
+    // finish line) plus an optional "dir" carrying the gate's latched crossing
+    // direction (absent in gates persisted before direction was recorded — those
+    // re-latch on their first crossing). An empty list clears whatever gates are
+    // currently set — a pure setter, with no opinion on why the caller is
+    // calling it. Any change discards the current lap's splits, which were
+    // measured against the outgoing gates.
+    void setSectorGates(const QVariantList &gates);
+
     // Last known GPS fix — used by TrackModel's nearest-track auto-detect scan
     double lastLat() const { return m_lastLat; }
     double lastLon() const { return m_lastLon; }
@@ -138,11 +152,40 @@ signals:
     // Emitted immediately when a lap completes — not throttled, safe for persistence.
     // path is a flat [lat, lon, lat, lon, …] list of the GPS fixes recorded during the lap.
     void lapCompleted(qint64 ms, const QVariantList &path);
+    // Emitted immediately alongside lapCompleted, for the lap that just finished.
+    // sectorMs has exactly as many entries as sector gates exist (S1, S2, S3, in
+    // order) when every gate was crossed during the lap; empty when one was
+    // missed — never a partial list, so a caller (SessionModel) can treat "the
+    // right length" as the sole eligibility test, per the shared optimal-lap
+    // rule (~/development/optimal-lap-algorithm.md).
+    void lapSectorsCompleted(const QList<qint64> &sectorMs);
+    // Emitted when the sector gates are (re)derived from a completed lap, or
+    // cleared (empty list) — a new finish line makes any prior gate geometry
+    // meaningless. TrackModel listens, to persist them per track the same way
+    // it persists the finish line. Same map shape as setSectorGates() takes.
+    void sectorGatesLearned(const QVariantList &gates);
 
 private slots:
     void emitNotifications();
 
 private:
+    // A GPS sample recorded during a lap: position plus elapsed time since the
+    // lap's start crossing. Declared up here (rather than beside
+    // m_currentLapTrace below) because deriveSectorGates() takes one as a
+    // parameter, and a member function's parameter types must already be
+    // declared at that point in the class body.
+    struct Sample { double lat; double lon; qint64 elapsedMs; };
+    // A sector-boundary gate: the same two-point segment as the finish line,
+    // tested the same way (see testGateCrossing()). dirSign is the crossing
+    // direction the gate accepts (as testGateCrossing() reports it), latched at
+    // derivation from the heading the gate was built perpendicular to; 0 = not
+    // yet known, in which case the first crossing latches it. Gates are drawn
+    // blindly 25 m across the first lap's racing line, so their span can overlap
+    // a return leg, the pit lane, or the far side of a hairpin — without this a
+    // single wrong-way pass consumes a gate out of order and the lap still
+    // reports a full-length (but wrong) set of splits.
+    struct Gate { double latA = 0.0, lonA = 0.0, latB = 0.0, lonB = 0.0; int dirSign = 0; };
+
     // Tests whether the path segment (prev fix → current fix) crosses the
     // finish-line gate; on a crossing it interpolates the exact crossing time
     // between the two fixes and completes/starts a lap. prevMs/nowMs are the
@@ -156,6 +199,25 @@ private:
     // (lat, lon), and writes its two endpoints to the out-params.
     void gateFromHeading(double lat, double lon,
                          double &latA, double &lonA, double &latB, double &lonB) const;
+    // Tests whether the path segment (prev fix → current fix) crosses the given
+    // gate; on a crossing writes the fraction t along prev→cur to crossFrac and,
+    // if dirSign is non-null, the sign of the crossing (which side the path
+    // crosses from), so a caller can latch/enforce a consistent direction.
+    // Shared by the finish-line gate and the two derived sector gates — one
+    // segment-intersection test, three callers.
+    bool testGateCrossing(const Gate &gate, double prevLat, double prevLon,
+                          double curLat, double curLon,
+                          double &crossFrac, int *dirSign = nullptr) const;
+    // Derives the two sector-boundary gates from a just-completed lap's own
+    // trace, at 1/3 and 2/3 of its cumulative distance, each built perpendicular
+    // to the trace's local heading there — the same construction as
+    // gateFromHeading(), just fed a heading measured from the recorded path
+    // instead of a live one. Called once, the first time a lap completes with no
+    // sector gates yet (m_sectorGates.isEmpty()); the result is fixed for the
+    // rest of the session, so every lap after the first splits at the same two
+    // places. No OSM centreline exists on the dash, so the first completed lap
+    // is its only source of truth for where the track is.
+    void deriveSectorGates(const QVector<Sample> &trace);
     // Shared by clearFinishLine() and resetLapCounters() — resets lap number,
     // timer, and current-lap path. Does not touch m_hasStartedTiming or the
     // finish-line fields; callers handle those themselves.
@@ -196,7 +258,6 @@ private:
     // lap's delta is measured against — position-for-position, by projecting the
     // live position onto the nearest reference segment, rather than by raw
     // elapsed time or cumulative distance.
-    struct Sample { double lat; double lon; qint64 elapsedMs; };
     QVector<Sample> m_currentLapTrace;
     QVector<Sample> m_bestLapTrace;
     // Anchor segment index for the reference nearest-point search; advances with
@@ -209,6 +270,18 @@ private:
     bool   m_finishLineSet = false;
     double m_gateLatA = 0.0, m_gateLonA = 0.0;
     double m_gateLatB = 0.0, m_gateLonB = 0.0;
+
+    // Sector-boundary gates (2 gates → 3 sectors), derived once from the first
+    // completed lap's own trace (see deriveSectorGates()) and reused, fixed, for
+    // the rest of the session. Empty until derivation succeeds; cleared (like
+    // the finish line) only when the finish line itself is cleared, since they
+    // were derived relative to its geometry.
+    QVector<Gate> m_sectorGates;
+    // Elapsed-ms (since m_lapStartMs) of each sector gate the current lap has
+    // crossed so far, in order. Cleared at the start of every lap. Compared
+    // against m_sectorGates.size() at lap completion: anything short means a
+    // missed gate, and the lap reports no splits at all (see updateLapTiming()).
+    QList<qint64> m_currentLapSectorMs;
 
     // Previous fix — one endpoint of the crossing test segment.
     double m_lastLat = 0.0;   // also the "last known position" for learn/scan

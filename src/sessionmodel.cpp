@@ -4,6 +4,7 @@
 #include "trackmodel.h"
 #include "logging.h"
 #include "apppaths.h"
+#include "optimallap.h"
 
 #include <QCoreApplication>
 #include <QFile>
@@ -32,6 +33,8 @@ SessionModel::SessionModel(CanDataModel *canModel, RaceBoxModel *raceBoxModel,
 {
     connect(m_raceBoxModel, &RaceBoxModel::lapCompleted,
             this, &SessionModel::onLapCompleted);
+    connect(m_raceBoxModel, &RaceBoxModel::lapSectorsCompleted,
+            this, &SessionModel::onLapSectorsCompleted);
     connect(m_canModel, &CanDataModel::speedChanged,
             this, &SessionModel::onSpeedChanged);
     connect(m_canModel, &CanDataModel::oilTempChanged,
@@ -54,6 +57,27 @@ void SessionModel::onLapCompleted(qint64 ms, const QVariantList &path)
         emit hasLapsChanged();
         updateCanSave();
     }
+}
+
+void SessionModel::onLapSectorsCompleted(const QList<qint64> &sectorMs)
+{
+    // Emitted by RaceBoxModel immediately alongside lapCompleted, for the same
+    // lap, so this list's size always tracks m_currentLapTimes's. Read only at
+    // save time (see saveCurrentSession()) — nothing needs it live.
+    //
+    // Enforce that pairing rather than assume it: onLapCompleted() rejects
+    // non-positive lap times, and nothing stops a future emitter of
+    // lapCompleted from doing likewise. An unpaired append here would shift
+    // every later lap's splits onto the wrong lap number (the 1-based index
+    // into this list *is* the lap number, see saveCurrentSession()) silently,
+    // with no assertion to reveal it.
+    if (m_currentLapSectorTimes.size() >= m_currentLapTimes.size()) {
+        qCWarning(lcApp) << "[SessionModel] sector splits with no matching lap — discarding"
+                         << "| laps:" << m_currentLapTimes.size()
+                         << "| split lists:" << m_currentLapSectorTimes.size();
+        return;
+    }
+    m_currentLapSectorTimes.append(sectorMs);
 }
 
 void SessionModel::onSpeedChanged()
@@ -106,18 +130,53 @@ void SessionModel::saveCurrentSession()
         pathsArray.append(pointArray);
     }
 
+    // The best-sector-stitch optimal lap over this now-completing session's
+    // laps (~/development/optimal-lap-algorithm.md) — a property of the
+    // session once it's done, like topSpeedKmh, not a live dashboard readout.
+    // Absent (0 / empty array) when fewer than two laps recorded a complete
+    // set of sector splits; the Sessions view treats that the same as a
+    // legacy session saved before sector gates existed.
+    QList<OptimalLap::SectoredLap> sectoredLaps;
+    sectoredLaps.reserve(m_currentLapSectorTimes.size());
+    for (int i = 0; i < m_currentLapSectorTimes.size(); ++i)
+        sectoredLaps.append({i + 1, m_currentLapSectorTimes[i]});
+    // The sector count is a runtime property of the gates in force this session
+    // (RaceBoxModel derives 2 gates → 3 sectors today, but a restored gate list
+    // can be any length), so read it off the laps themselves rather than
+    // leaning on compute()'s default. Hard-coding 3 against a 4-sector track
+    // would make every lap ineligible and silently drop the optimal lap.
+    int sectorCount = 0;
+    for (const QList<qint64> &splits : m_currentLapSectorTimes) {
+        if (!splits.isEmpty()) { sectorCount = splits.size(); break; }
+    }
+    const std::optional<OptimalLap::Result> optimal =
+        OptimalLap::compute(sectoredLaps, sectorCount);
+
+    QJsonArray optimalSectorsArray;
+    if (optimal) {
+        for (const OptimalLap::BestSector &sector : optimal->sectors) {
+            QJsonObject sectorObj;
+            sectorObj["sector"]    = sector.sector;
+            sectorObj["lapNumber"] = sector.lapNumber;
+            sectorObj["sectorMs"]  = sector.sectorMs;
+            optimalSectorsArray.append(sectorObj);
+        }
+    }
+
     QJsonObject record;
-    record["title"]        = now.toString("yyyy-MM-dd HH:mm");
-    record["timestampIso"] = now.toString(Qt::ISODate);
-    record["lapMs"]        = lapArray;
-    record["lapPaths"]     = pathsArray;
-    record["topSpeedKmh"]  = m_topSpeedKmh;
-    record["maxOilC"]      = m_maxOilC;
-    record["maxCoolantC"]  = m_maxCoolantC;
-    record["maxLatG"]      = m_raceBoxModel->maxLatG();
-    record["maxLonG"]      = m_raceBoxModel->maxLonG();
-    record["trackId"]      = m_trackModel->activeTrackId();
-    record["trackName"]    = m_trackModel->activeTrackName();
+    record["title"]         = now.toString("yyyy-MM-dd HH:mm");
+    record["timestampIso"]  = now.toString(Qt::ISODate);
+    record["lapMs"]         = lapArray;
+    record["lapPaths"]      = pathsArray;
+    record["topSpeedKmh"]   = m_topSpeedKmh;
+    record["maxOilC"]       = m_maxOilC;
+    record["maxCoolantC"]   = m_maxCoolantC;
+    record["maxLatG"]       = m_raceBoxModel->maxLatG();
+    record["maxLonG"]       = m_raceBoxModel->maxLonG();
+    record["trackId"]       = m_trackModel->activeTrackId();
+    record["trackName"]     = m_trackModel->activeTrackName();
+    record["optimalLapMs"]  = optimal ? optimal->lapMs : 0;
+    record["optimalSectors"] = optimalSectorsArray;
 
     // Prepend to keep newest-first order
     m_sessions.prepend(record.toVariantMap());
@@ -131,6 +190,7 @@ void SessionModel::saveCurrentSession()
     // stat clears at the same point in the save.
     m_currentLapTimes.clear();
     m_currentLapPaths.clear();
+    m_currentLapSectorTimes.clear();
     m_topSpeedKmh = 0;
     m_maxOilC     = 0.0;
     m_maxCoolantC = 0.0;

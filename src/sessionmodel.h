@@ -49,6 +49,7 @@ signals:
 
 private slots:
     void onLapCompleted(qint64 ms, const QVariantList &path);
+    void onLapSectorsCompleted(const QList<qint64> &sectorMs);
     void onSpeedChanged();
     void onOilTempChanged();
     void onCoolantTempChanged();
@@ -69,6 +70,16 @@ private:
 
     QList<qint64>       m_currentLapTimes;
     QList<QVariantList> m_currentLapPaths;
+    // Parallel to m_currentLapTimes: lap i's sector splits, or an empty list if
+    // lap i missed a sector gate. Lap *number* for OptimalLap::SectoredLap is
+    // this list's 1-based index — it resets to empty in lockstep with
+    // m_currentLapTimes (both driven by the same pair of RaceBoxModel signals
+    // for the same completed lap), so the two indices always agree with
+    // RaceBoxModel's own m_lapNumber for the laps recorded so far this session.
+    // Read only at save time (see saveCurrentSession()) — the optimal lap is a
+    // property of a *completed* session, shown in the Sessions view, not a
+    // live dashboard readout.
+    QList<QList<qint64>> m_currentLapSectorTimes;
     int            m_topSpeedKmh = 0;
     double         m_maxOilC     = 0.0;
     double         m_maxCoolantC = 0.0;
