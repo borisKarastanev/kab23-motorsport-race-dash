@@ -93,10 +93,6 @@ constexpr double kLoopSWLat = 50.9980, kLoopSWLon = -0.0030;
 constexpr double kLoopSELat = 50.9980, kLoopSELon =  0.0000;
 constexpr double kLoopCrossLat = 51.0006, kLoopCrossLon = 0.0000;
 
-// Q_ARG is a macro, so the comma in QList<qint64> has to be hidden behind an
-// alias before it can name the slot parameter's type.
-using SectorSplits = QList<qint64>;
-
 QVariantMap gateMap(double lat1, double lon1, double lat2, double lon2)
 {
     QVariantMap m;
@@ -403,7 +399,7 @@ void TestSessionModel::sectorSplitsWithoutAMatchingLapAreDiscarded()
     // exactly as a signal connection does.
     const QList<qint64> stray{1, 1, 1};
     QVERIFY(QMetaObject::invokeMethod(&sessions, "onLapSectorsCompleted",
-                                      Q_ARG(SectorSplits, stray)));
+                                      Q_ARG(QList<qint64>, stray)));
 
     sessions.saveCurrentSession();
 
