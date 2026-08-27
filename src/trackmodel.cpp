@@ -17,6 +17,37 @@ namespace {
 constexpr double kDetectRadiusM = 5000.0;
 constexpr int    kDetectIntervalMs = 5000;
 const char *kMockTrackId = "mock-track";
+
+// The on-disk gate shape, in one place. A gate persists as a flat
+// [lat1, lon1, lat2, lon2] array (the RaceBox "startLine" format, so a line can
+// be typed in by hand), optionally followed by the latched crossing direction —
+// finish lines store the four coordinates, sector gates append the fifth field.
+// Both finishLines and sectorGates entries are read and written through this
+// pair, so the format has a single definition rather than one per call site.
+constexpr int kGateArrayCoords = 4;
+
+QVariantMap gateMapFromArray(const QJsonArray &a, bool withDir)
+{
+    QVariantMap map;
+    map["lat1"] = a[0].toDouble(); map["lon1"] = a[1].toDouble();
+    map["lat2"] = a[2].toDouble(); map["lon2"] = a[3].toDouble();
+    // Sector gates only. Absent in files written before direction was recorded,
+    // where 0 correctly means "re-latch on first crossing". Finish lines never
+    // carry one — theirs is latched live in RaceBoxModel, not persisted — so the
+    // key stays off those maps rather than sitting there as a misleading 0.
+    if (withDir)
+        map["dir"] = a.size() > kGateArrayCoords ? a[kGateArrayCoords].toInt() : 0;
+    return map;
+}
+
+QJsonArray gateArrayFromMap(const QVariantMap &m, bool withDir)
+{
+    QJsonArray a { m["lat1"].toDouble(), m["lon1"].toDouble(),
+                   m["lat2"].toDouble(), m["lon2"].toDouble() };
+    if (withDir)
+        a.append(m["dir"].toInt());
+    return a;
+}
 }
 
 QString TrackModel::userStatePath()
@@ -194,19 +225,19 @@ bool TrackModel::isFinishLineLocked(const QString &id) const
 
 QVariantMap TrackModel::gateFor(const QString &id) const
 {
-    // Precedence: a user-learned line (m_finishLines[id]) overrides the track's
-    // confirmed DB gate. In production a confirmed track is locked, so no learned
-    // line is ever stored for it and the confirmed gate is what's returned; the
-    // override only matters in the temporary un-locked testing state, where it
-    // keeps a freshly-learned line consistent across timing, the map, and
-    // reselection instead of being masked by the confirmed gate. No global ("")
-    // fallback here — callers add it where appropriate.
-    if (m_finishLines.contains(id))
-        return m_finishLines.value(id);
+    // Precedence: a track's confirmed DB gate is authoritative and cannot be
+    // overridden — onFinishLineLearned() refuses to store a learned line against
+    // a locked track, and the UI hides the control entirely. A learned entry can
+    // still exist in tracks-user.json from before that lock was enforced (or
+    // from a hand-edited file); the DB gate wins over it rather than being
+    // masked by it, because a locked track offers no way to reset a stale
+    // learned line. Only tracks with no confirmed gate fall through to the
+    // user-learned one. No global ("") fallback here — callers add it where
+    // appropriate.
     const Track *t = findTrack(id);
     if (t && !t->confirmedFinishLine.isEmpty())
         return t->confirmedFinishLine;
-    return {};
+    return m_finishLines.value(id); // {} when the track has no learned line either
 }
 
 bool TrackModel::emitFinishLineFor(const QString &id)
@@ -216,6 +247,13 @@ bool TrackModel::emitFinishLineFor(const QString &id)
         return false;
     emit applyFinishLine(fl["lat1"].toDouble(), fl["lon1"].toDouble(),
                          fl["lat2"].toDouble(), fl["lon2"].toDouble());
+    // Always paired with the finish line, including an empty list when id has
+    // none stored — otherwise a track with no gates yet would inherit
+    // whichever gates happened to already be live from the previously active
+    // track. Read from and (see onSectorGatesLearned) written back to the same
+    // slot the line itself resolved from.
+    m_gateSlotId = id;
+    emit applySectorGates(m_sectorGates.value(id));
     return true;
 }
 
@@ -325,6 +363,7 @@ void TrackModel::loadUserState()
 
     const QJsonObject obj = doc.object();
     m_activeTrackId = obj["activeTrackId"].toString();
+    m_gateSlotId    = m_activeTrackId; // until applyStartupFinishLine() resolves the real slot
 
     for (const QJsonValue &v : obj["favorites"].toArray())
         m_favorites.insert(v.toString());
@@ -343,20 +382,47 @@ void TrackModel::loadUserState()
             continue;
         }
         const QJsonArray a = val.toArray();
-        if (a.size() < 4) {
+        if (a.size() < kGateArrayCoords) {
             qCWarning(lcApp) << "Ignoring malformed finish line for"
                              << (it.key().isEmpty() ? QStringLiteral("(global)") : it.key());
             continue;
         }
-        QVariantMap map;
-        map["lat1"] = a[0].toDouble(); map["lon1"] = a[1].toDouble();
-        map["lat2"] = a[2].toDouble(); map["lon2"] = a[3].toDouble();
-        m_finishLines[it.key()] = map;
+        m_finishLines[it.key()] = gateMapFromArray(a, /*withDir=*/false);
+    }
+
+    // sectorGates: trackId -> array of gates in the shape gateMapFromArray()
+    // defines, each carrying its latched direction. The whole key is absent in
+    // files saved before sector gates existed — an empty object here is exactly
+    // that case.
+    const QJsonObject sectorGates = obj["sectorGates"].toObject();
+    for (auto it = sectorGates.begin(); it != sectorGates.end(); ++it) {
+        QVariantList gates;
+        bool malformed = false;
+        for (const QJsonValue &gv : it.value().toArray()) {
+            const QJsonArray a = gv.toArray();
+            if (a.size() < kGateArrayCoords) { malformed = true; break; }
+            gates.append(gateMapFromArray(a, /*withDir=*/true));
+        }
+        // All or nothing: a gate list is only meaningful at the length it was
+        // derived at. Keeping the survivors of a partly-corrupt entry yields a
+        // short list, which silently changes the track's sector count — every
+        // lap then fails the optimal lap's eligibility test, and derivation
+        // never re-runs (it is skipped whenever any gates exist), so the loss is
+        // permanent and persistUserState() writes the truncation back out.
+        if (malformed) {
+            qCWarning(lcApp) << "Discarding malformed sector gates for"
+                             << (it.key().isEmpty() ? QStringLiteral("(global)") : it.key())
+                             << "— they will be re-derived from the next completed lap";
+            continue;
+        }
+        if (!gates.isEmpty())
+            m_sectorGates[it.key()] = gates;
     }
 
     qCInfo(lcApp) << "Loaded track user state — active:" << m_activeTrackId
                   << "| favorites:" << m_favorites.size()
-                  << "| stored finish lines:" << m_finishLines.size();
+                  << "| stored finish lines:" << m_finishLines.size()
+                  << "| stored sector gates:" << m_sectorGates.size();
 }
 
 void TrackModel::persistUserState()
@@ -370,13 +436,18 @@ void TrackModel::persistUserState()
     obj["favorites"] = favArr;
 
     QJsonObject flObj;
-    for (auto it = m_finishLines.constBegin(); it != m_finishLines.constEnd(); ++it) {
-        const QVariantMap &m = it.value();
-        const QJsonArray a { m["lat1"].toDouble(), m["lon1"].toDouble(),
-                             m["lat2"].toDouble(), m["lon2"].toDouble() };
-        flObj[it.key()] = a;
-    }
+    for (auto it = m_finishLines.constBegin(); it != m_finishLines.constEnd(); ++it)
+        flObj[it.key()] = gateArrayFromMap(it.value(), /*withDir=*/false);
     obj["finishLines"] = flObj;
+
+    QJsonObject sgObj;
+    for (auto it = m_sectorGates.constBegin(); it != m_sectorGates.constEnd(); ++it) {
+        QJsonArray gatesArr;
+        for (const QVariant &gv : it.value())
+            gatesArr.append(gateArrayFromMap(gv.toMap(), /*withDir=*/true));
+        sgObj[it.key()] = gatesArr;
+    }
+    obj["sectorGates"] = sgObj;
 
     QFile f(userStatePath());
     if (!f.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
@@ -389,6 +460,13 @@ void TrackModel::persistUserState()
 void TrackModel::setActiveTrack(const QString &id, bool autoDetected)
 {
     m_activeTrackId = id;
+    // Default the gate slot to the incoming track; the emitFinishLineFor() the
+    // callers run next overrides it with the slot the line actually resolved
+    // from (possibly the global one). Without this, a track that ends up with
+    // no line at all would leave the *previous* track's slot latched, and the
+    // resulting clearFinishLineRequested() round-trip would delete that
+    // track's saved gates.
+    m_gateSlotId    = id;
     m_autoDetected  = autoDetected;
     persistUserState();
     emit activeTrackChanged();
@@ -509,11 +587,14 @@ void TrackModel::dismissSuggestedTrack()
 
 void TrackModel::onFinishLineLearned(double latA, double lonA, double latB, double lonB)
 {
-    // NOTE: the lock-enforcement guard that used to sit here (rejecting
-    // learned lines for tracks with a confirmed DB "start" gate) is
-    // temporarily removed so the learn/reset flow can be tested live on one
-    // of those tracks. Re-add `if (isFinishLineLocked(m_activeTrackId)) return;`
-    // once verified.
+    // A track carrying a confirmed "start" gate in the DB has a surveyed S/F
+    // line, and that line is not the driver's to move — neither by learning a
+    // new one nor by resetting it. Tracks without one (a circuit the DB doesn't
+    // pin down, the mock track, or the global "no track active" slot used on
+    // the road) stay fully learnable. Guards both branches below: there is no
+    // user-learned entry for a locked track to remove either.
+    if (isFinishLineLocked(m_activeTrackId))
+        return;
 
     // Keyed by active track id; the empty id ("no track active") holds the
     // global finish line. This is the single persistence path for both cases.
@@ -530,9 +611,29 @@ void TrackModel::onFinishLineLearned(double latA, double lonA, double latB, doub
     fl["lat1"] = latA; fl["lon1"] = lonA;
     fl["lat2"] = latB; fl["lon2"] = lonB;
     m_finishLines[m_activeTrackId] = fl;
+    // The active track now owns a line of its own, so it owns the gate slot too
+    // — even if it had been borrowing the global line until this moment.
+    m_gateSlotId = m_activeTrackId;
     persistUserState();
     emit activeTrackChanged();
     rebuildFiltered();
+}
+
+void TrackModel::onSectorGatesLearned(const QVariantList &gates)
+{
+    // Keyed by m_gateSlotId — the slot the live finish line resolved from —
+    // rather than by m_activeTrackId, which the two differ from whenever a
+    // track is running on the global ("") line. Gates are geometry derived
+    // against that line, so they belong wherever the line does; storing them
+    // under the active track instead puts them where emitFinishLineFor() will
+    // never read them back, and lap 1 of every future session re-derives them.
+    if (gates.isEmpty()) {
+        if (m_sectorGates.remove(m_gateSlotId) > 0)
+            persistUserState();
+        return;
+    }
+    m_sectorGates[m_gateSlotId] = gates;
+    persistUserState();
 }
 
 void TrackModel::applyStartupFinishLine()

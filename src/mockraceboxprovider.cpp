@@ -1,7 +1,18 @@
 #include "mockraceboxprovider.h"
 #include <cmath>
 
-// Simulation parameters
+// Simulation parameters. kLapCount is the number of speed-profile laps driven,
+// not the number of *completed*, timed laps: onTick() switches to the parked
+// position on the same tick that would otherwise produce the final lap's
+// finish-line-crossing fix, so a run always completes kLapCount - 1 timed
+// laps — 2, at 3. That's one short of the two *eligible* laps the optimal
+// lap needs on a session's very first-ever run for this track, since the
+// first lap completed can never be eligible for itself — it's the one
+// RaceBoxModel derives the sector gates from (see
+// RaceBoxModel::deriveSectorGates). From the second run on, though, those
+// gates are persisted per track (TrackModel::onSectorGatesLearned) and
+// restored at startup, so both of a 2-lap run's laps are eligible and the
+// optimal lap shows up same as it would on a real track driven before.
 static constexpr int    kLapCount          = 3;
 static constexpr double kBaseLapS          = 15.0;   // 0:15.000
 static constexpr double kLapImprovementS   = 0.20;   // each lap faster by this much

@@ -73,6 +73,9 @@ public slots:
     // Connected in main.cpp to RaceBoxModel::finishLineLearned. Coordinates are
     // the two endpoints of the finish-line gate (all zero clears it).
     void onFinishLineLearned(double latA, double lonA, double latB, double lonB);
+    // Connected in main.cpp to RaceBoxModel::sectorGatesLearned. Same
+    // per-track keying and persistence as onFinishLineLearned; empty clears.
+    void onSectorGatesLearned(const QVariantList &gates);
 
 signals:
     void countriesChanged();
@@ -85,6 +88,11 @@ signals:
     void applyFinishLine(double latA, double lonA, double latB, double lonB);
     // Connected in main.cpp to RaceBoxModel::clearFinishLine
     void clearFinishLineRequested();
+    // Connected in main.cpp to RaceBoxModel::setSectorGates — always emitted
+    // paired with applyFinishLine (see emitFinishLineFor()), including with an
+    // empty list, so switching tracks never leaves a previous track's gates
+    // active against the newly-applied finish line.
+    void applySectorGates(const QVariantList &gates);
 
 private slots:
     void scanNearestTrack();
@@ -108,8 +116,10 @@ private:
     void rebuildFiltered();
     void setActiveTrack(const QString &id, bool autoDetected);
     const Track *findTrack(const QString &id) const;
-    // Emits applyFinishLine for the stored finish line of id, if any.
-    // Returns true if a finish line was emitted.
+    // Emits applyFinishLine for the stored finish line of id, if any, paired
+    // with that same id's sector gates. Returns true if a finish line was
+    // emitted, and on success records id as m_gateSlotId so gates later derived
+    // against this line are stored back under the slot it came from.
     bool emitFinishLineFor(const QString &id);
     // True if id has a confirmed finish line baked into the track DB entry
     // itself (Track::confirmedFinishLine), rather than a user-learned one.
@@ -133,6 +143,24 @@ private:
     // all finish lines. Persisted as a flat [lat1,lon1,lat2,lon2] "startLine"
     // array (matching the RaceBox export format for easy manual entry).
     QHash<QString, QVariantMap> m_finishLines;
+    // Track id -> derived sector gates (list of {"lat1","lon1","lat2","lon2"}
+    // maps, same shape as one m_finishLines entry). The empty-string key holds
+    // the global slot's gates, mirroring m_finishLines. Populated from
+    // RaceBoxModel::sectorGatesLearned once a session's first lap derives
+    // them, and re-applied on every future selection of that track (or every
+    // future startup, for the currently active one) so the first lap of every
+    // *subsequent* session doesn't have to re-derive them from scratch.
+    QHash<QString, QVariantList> m_sectorGates;
+    // The m_sectorGates/m_finishLines key the *currently applied* finish line
+    // was resolved from — which is not always m_activeTrackId, because a track
+    // with no line of its own falls back to the global ("") slot. Sector gates
+    // are derived against whichever line is actually live, so they must be
+    // stored under the slot that line came from; keying them off m_activeTrackId
+    // instead writes them where emitFinishLineFor() will never look again, and
+    // the first lap of every session is burned re-deriving gates that were
+    // already saved. Updated by emitFinishLineFor(), setActiveTrack() and
+    // onFinishLineLearned().
+    QString m_gateSlotId;
     QSet<QString> m_dismissedThisRun;
 
     QString m_searchText;

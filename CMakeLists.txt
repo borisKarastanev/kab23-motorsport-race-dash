@@ -14,7 +14,7 @@ if(CCACHE_PROGRAM)
     set(CMAKE_CXX_COMPILER_LAUNCHER "${CCACHE_PROGRAM}")
 endif()
 
-project(bmw-e46-dash VERSION 2.1.0 LANGUAGES CXX)
+project(bmw-e46-dash VERSION 3.0.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -59,6 +59,7 @@ add_executable(bmw-e46-dash
     src/raceboxmodel.cpp
     src/mockraceboxprovider.cpp
     src/raceboxprovider.cpp
+    src/optimallap.cpp
     src/sessionmodel.cpp
     src/trackmodel.cpp
     src/logbuffermodel.cpp

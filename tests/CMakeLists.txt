@@ -33,6 +33,13 @@ target_link_libraries(tst_raceboxmodel PRIVATE Qt6::Test)
 add_test(NAME tst_raceboxmodel COMMAND tst_raceboxmodel)
 set_tests_properties(tst_raceboxmodel PROPERTIES ENVIRONMENT "${DASH_TEST_ENV}")
 
+# ── optimallap: shared optimal-lap rule, free functions, no Qt object ─
+add_executable(tst_optimallap cpp/tst_optimallap.cpp ${APP_SRC_DIR}/src/optimallap.cpp)
+target_include_directories(tst_optimallap PRIVATE ${APP_SRC_DIR})
+target_link_libraries(tst_optimallap PRIVATE Qt6::Test)
+add_test(NAME tst_optimallap COMMAND tst_optimallap)
+set_tests_properties(tst_optimallap PROPERTIES ENVIRONMENT "${DASH_TEST_ENV}")
+
 # ── updatemodel: mock-mode update state machine ───────────────────────
 add_executable(tst_updatemodel cpp/tst_updatemodel.cpp
     ${APP_SRC_DIR}/src/updatemodel.cpp
@@ -69,6 +76,7 @@ add_executable(tst_sessionmodel cpp/tst_sessionmodel.cpp
     ${APP_SRC_DIR}/src/candatamodel.cpp
     ${APP_SRC_DIR}/src/raceboxmodel.cpp
     ${APP_SRC_DIR}/src/trackmodel.cpp
+    ${APP_SRC_DIR}/src/optimallap.cpp
     ${APP_SRC_DIR}/src/logging.cpp
 )
 target_include_directories(tst_sessionmodel PRIVATE ${APP_SRC_DIR})

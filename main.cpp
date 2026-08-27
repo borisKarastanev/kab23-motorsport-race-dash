@@ -126,13 +126,20 @@ int main(int argc, char *argv[])
 
     // TrackModel is the single owner of finish lines: it stores one per track id
     // plus a global (no-track) line, persists them to tracks-user.json, and
-    // applies the right one to RaceBoxModel on selection / startup.
+    // applies the right one to RaceBoxModel on selection / startup. Sector
+    // gates ride along the same path (see TrackModel::emitFinishLineFor()), so
+    // a track already timed once doesn't waste the first lap of every future
+    // session re-deriving gates it already has.
     QObject::connect(&raceBoxModel, &RaceBoxModel::finishLineLearned,
                      &trackModel, &TrackModel::onFinishLineLearned);
     QObject::connect(&trackModel, &TrackModel::applyFinishLine,
                      &raceBoxModel, &RaceBoxModel::setFinishLine);
     QObject::connect(&trackModel, &TrackModel::clearFinishLineRequested,
                      &raceBoxModel, &RaceBoxModel::clearFinishLine);
+    QObject::connect(&raceBoxModel, &RaceBoxModel::sectorGatesLearned,
+                     &trackModel, &TrackModel::onSectorGatesLearned);
+    QObject::connect(&trackModel, &TrackModel::applySectorGates,
+                     &raceBoxModel, &RaceBoxModel::setSectorGates);
     trackModel.applyStartupFinishLine();
 
     // Cloud uplink. Uses the REAL client even under --mock: mock mode is about

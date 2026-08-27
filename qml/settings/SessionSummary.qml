@@ -19,6 +19,17 @@ Item {
 
     readonly property int bestLapIndex: lapMs.length === 0 ? -1 : lapMs.indexOf(bestLapMs)
 
+    // Best-sector-stitch optimal lap, computed and persisted at save time (see
+    // SessionModel::saveCurrentSession()) — a property of this completed
+    // session, not something recomputed here. Absent (0) on a session that had
+    // fewer than two laps with a complete set of sector splits, including any
+    // session saved before sector gates existed.
+    readonly property int optimalLapMs: payload.optimalLapMs || 0
+
+    // Same blue TrackMap.qml strokes the lap line with — ties this readout to
+    // the line it's a time for, and matches the .isSelected accent above.
+    readonly property color lineColor: "#1E88E5"
+
     ColumnLayout {
         anchors.fill: parent
         spacing: 0
@@ -144,6 +155,12 @@ Item {
             Repeater {
                 model: [
                     { label: "TRACK",        value: payload.trackName || "—" },
+                    // Only present once the session recorded enough sectored
+                    // laps for an optimal lap to exist (see optimalLapMs).
+                    ...(optimalLapMs > 0
+                        ? [{ label: "OPTIMAL LAP", value: Fmt.formatMs(optimalLapMs),
+                             valueColor: lineColor, star: true }]
+                        : []),
                     { label: "TOP SPEED",    value: (payload.topSpeedKmh || 0) + " km/h" },
                     { label: "MAX LATERAL/MAX LONGITUDINAL",
                       value: (payload.maxLatG !== undefined && payload.maxLonG !== undefined)
@@ -158,15 +175,31 @@ Item {
                     height: 36
                     color: "#0d0d0d"
 
-                    Text {
+                    Row {
                         anchors.left: parent.left
                         anchors.leftMargin: 16
                         anchors.verticalCenter: parent.verticalCenter
-                        text: modelData.label
-                        color: "#444444"
-                        font.pixelSize: 9
-                        font.family: "monospace"
-                        font.letterSpacing: 2
+                        spacing: 4
+
+                        Text {
+                            text: modelData.label
+                            color: "#444444"
+                            font.pixelSize: 9
+                            font.family: "monospace"
+                            font.letterSpacing: 2
+                            anchors.verticalCenter: parent.verticalCenter
+                        }
+
+                        // Same favorite-star glyph/color as TracksBrowser.qml's
+                        // favoriteBtn — ties this row to "the one you've marked
+                        // as best", the same visual language used elsewhere.
+                        Text {
+                            visible: modelData.star === true
+                            text: "★"
+                            color: "#ffcc00"
+                            font.pixelSize: 11
+                            anchors.verticalCenter: parent.verticalCenter
+                        }
                     }
 
                     Text {
@@ -174,7 +207,7 @@ Item {
                         anchors.rightMargin: 16
                         anchors.verticalCenter: parent.verticalCenter
                         text: modelData.value
-                        color: "#cccccc"
+                        color: modelData.valueColor || "#cccccc"
                         font.pixelSize: 12
                         font.bold: true
                         font.family: "monospace"
