@@ -521,8 +521,12 @@ void RaceBoxModel::updateLapTiming(double prevLat, double prevLon, double curLat
         pathList.reserve(m_currentLapPath.size());
         for (double v : m_currentLapPath)
             pathList.append(v);
-        emit lapCompleted(lapMs, pathList);
-        emit lapSectorsCompleted(sectorMs);
+        RaceBoxLapResult lap;
+        lap.lapNumber = m_lapNumber;
+        lap.ms        = lapMs;
+        lap.path      = pathList;
+        lap.sectorMs  = sectorMs;
+        emit lapCompleted(lap);
         const bool newBest = (m_bestLapMs == 0 || lapMs < m_bestLapMs);
         if (newBest) {
             m_bestLapMs = lapMs;

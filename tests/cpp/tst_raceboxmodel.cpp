@@ -379,8 +379,8 @@ void TestRaceBoxModel::sectorGatesDerivedInterpolatedAndReusedAcrossLaps()
     model.setFinishLine(kGateLat, kGateLonA, kGateLat, kGateLonB);
 
     QList<QList<qint64>> received;
-    connect(&model, &RaceBoxModel::lapSectorsCompleted,
-            [&](const QList<qint64> &sectorMs) { received.append(sectorMs); });
+    connect(&model, &RaceBoxModel::lapCompleted,
+            [&](const RaceBoxLapResult &lap) { received.append(lap.sectorMs); });
 
     // Arm: south of the gate, then north -> crosses, lands at kLoopCrossLat/Lon.
     model.onData(makeFix(50.9998, 0.0));
@@ -423,8 +423,8 @@ void TestRaceBoxModel::missedSectorGateYieldsNoSplits()
     model.setFinishLine(kGateLat, kGateLonA, kGateLat, kGateLonB);
 
     QList<QList<qint64>> received;
-    connect(&model, &RaceBoxModel::lapSectorsCompleted,
-            [&](const QList<qint64> &sectorMs) { received.append(sectorMs); });
+    connect(&model, &RaceBoxModel::lapCompleted,
+            [&](const RaceBoxLapResult &lap) { received.append(lap.sectorMs); });
 
     model.onData(makeFix(50.9998, 0.0));
     QTest::qWait(40);
@@ -459,8 +459,8 @@ void TestRaceBoxModel::setSectorGatesAppliesImmediatelyWithoutWastingALap()
     model.setSectorGates(capturedGates);
 
     QList<QList<qint64>> received;
-    connect(&model, &RaceBoxModel::lapSectorsCompleted,
-            [&](const QList<qint64> &sectorMs) { received.append(sectorMs); });
+    connect(&model, &RaceBoxModel::lapCompleted,
+            [&](const RaceBoxLapResult &lap) { received.append(lap.sectorMs); });
 
     model.onData(makeFix(50.9998, 0.0));
     QTest::qWait(40);
@@ -535,8 +535,8 @@ void TestRaceBoxModel::wrongWaySectorGateCrossingIgnored()
     model.setSectorGates(gates);
 
     QList<QList<qint64>> received;
-    connect(&model, &RaceBoxModel::lapSectorsCompleted,
-            [&](const QList<qint64> &sectorMs) { received.append(sectorMs); });
+    connect(&model, &RaceBoxModel::lapCompleted,
+            [&](const RaceBoxLapResult &lap) { received.append(lap.sectorMs); });
 
     model.onData(makeFix(50.9998, 0.0));
     QTest::qWait(40);
@@ -561,8 +561,8 @@ void TestRaceBoxModel::setSectorGatesDiscardsTheCurrentLapsSplits()
     model.setSectorGates(gates);
 
     QList<QList<qint64>> received;
-    connect(&model, &RaceBoxModel::lapSectorsCompleted,
-            [&](const QList<qint64> &sectorMs) { received.append(sectorMs); });
+    connect(&model, &RaceBoxModel::lapCompleted,
+            [&](const RaceBoxLapResult &lap) { received.append(lap.sectorMs); });
 
     model.onData(makeFix(50.9998, 0.0));
     QTest::qWait(40);

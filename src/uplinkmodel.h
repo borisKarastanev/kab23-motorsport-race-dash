@@ -7,9 +7,9 @@
 #include <QVector>
 
 #include "uplinkspool.h"
+#include "raceboxmodel.h"
 
 class CanDataModel;
-class RaceBoxModel;
 class TrackModel;
 class CloudConfig;
 class ICloudClient;
@@ -107,7 +107,7 @@ public slots:
     // repo's rule that these models talk only through signals — and meaning the
     // `stop` event's lap list is built from the same source the driver's
     // on-screen times come from.
-    void onLapCompleted(qint64 ms, const QVariantList &path);
+    void onLapCompleted(const RaceBoxLapResult &lap);
     // Re-reads CloudConfig and reconnects. Bound to the settings page so
     // pairing takes effect without a restart.
     void applyConfiguration();

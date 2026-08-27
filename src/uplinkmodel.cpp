@@ -322,11 +322,12 @@ void UplinkModel::onSessionSaved()
         endSession();
 }
 
-void UplinkModel::onLapCompleted(qint64 ms, const QVariantList &path)
+void UplinkModel::onLapCompleted(const RaceBoxLapResult &lap)
 {
-    Q_UNUSED(path) // the cloud rebuilds the racing line from the GPS trace
+    // lap.path/lap.sectorMs ignored — the cloud rebuilds the racing line from
+    // the GPS trace, and sector splits aren't part of the `stop` envelope yet.
     if (m_sessionActive)
-        m_lapTimesMs.append(ms);
+        m_lapTimesMs.append(lap.ms);
 }
 
 void UplinkModel::beginSession()
