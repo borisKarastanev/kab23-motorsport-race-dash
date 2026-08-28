@@ -77,7 +77,15 @@ QString TimeModel::utcOffset() const
 
 QString TimeModel::localTimeText() const
 {
-    return QDateTime::currentDateTime().toString("yyyy-MM-dd HH:mm:ss");
+    // Through timezoneId(), like utcOffset(): QDateTime::currentDateTime()
+    // alone reflects the OS's actual local zone, not the mock zone / the zone
+    // the user just picked, so a plain-local read here would leave this row
+    // showing the wrong time after setTimezone() in mock mode.
+    const QTimeZone tz(timezoneId().toUtf8());
+    const QDateTime now = tz.isValid()
+        ? QDateTime::currentDateTimeUtc().toTimeZone(tz)
+        : QDateTime::currentDateTime();
+    return now.toString("yyyy-MM-dd HH:mm:ss");
 }
 
 bool TimeModel::gpsTimeValid() const
@@ -189,21 +197,27 @@ void TimeModel::setTimezone(const QString &id)
         return;
     }
 
-    if (m_mockMode) {
-        qCInfo(lcApp) << "[mock] set-timezone" << id;
-        m_mockTimezoneId = id;
-        m_errorText.clear();
-        emit changed();
-        return;
-    }
-
     m_busy = true;
+    m_errorText.clear();
     emit changed();
     applyTimezone(id);
 }
 
 void TimeModel::applyTimezone(const QString &id)
 {
+    // Mock-aware here (not just in setTimezone()), because detectTimezoneFromIp()
+    // also funnels its result through this same function on success — and that
+    // path must stay usable under --mock (see detectTimezoneFromIp()) without
+    // shelling out to the real timedatectl on this machine.
+    if (m_mockMode) {
+        qCInfo(lcApp) << "[mock] set-timezone" << id;
+        m_mockTimezoneId = id;
+        m_busy = false;
+        m_errorText.clear();
+        emit changed();
+        return;
+    }
+
     runTimedatectl({"set-timezone", id}, kProcessTimeoutMs, finisher("Could not set timezone"));
 }
 
@@ -273,11 +287,11 @@ void TimeModel::detectTimezoneFromIp()
     if (m_busy)
         return;
 
-    if (m_mockMode) {
-        qCInfo(lcApp) << "[mock] IP geolocation skipped";
-        return;
-    }
-
+    // No mock short-circuit: this is a read-only HTTP GET, not a system-state
+    // write (applyTimezone() is what guards against touching this machine's
+    // real timezone, and it's mock-aware on its own). Skipping the request
+    // here as well would leave the "SYNCHRONIZE TIMEZONE" toggle a no-op
+    // under --mock.
     m_busy = true;
     m_errorText.clear();
     emit changed();
