@@ -2,8 +2,8 @@
 #include <QSignalSpy>
 #include <cmath>
 
-#include "src/raceboxmodel.h"
-#include "src/raceboxdata.h"
+#include "src/race/raceboxmodel.h"
+#include "src/race/raceboxdata.h"
 
 namespace {
 

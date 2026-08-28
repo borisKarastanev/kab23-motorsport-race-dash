@@ -1,7 +1,7 @@
 #include <QTest>
 #include <limits>
 
-#include "src/optimallap.h"
+#include "src/race/optimallap.h"
 
 using OptimalLap::BestSector;
 using OptimalLap::compute;

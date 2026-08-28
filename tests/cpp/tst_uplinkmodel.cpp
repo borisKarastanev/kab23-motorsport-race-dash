@@ -6,14 +6,14 @@
 #include <QStandardPaths>
 #include <QTemporaryDir>
 
-#include "src/candatamodel.h"
-#include "src/cloudconfig.h"
-#include "src/mockcloudclient.h"
-#include "src/raceboxdata.h"
-#include "src/raceboxmodel.h"
-#include "src/trackmodel.h"
-#include "src/uplinkmodel.h"
-#include "src/uplinkspool.h"
+#include "src/can/candatamodel.h"
+#include "src/cloud/cloudconfig.h"
+#include "src/cloud/mockcloudclient.h"
+#include "src/race/raceboxdata.h"
+#include "src/race/raceboxmodel.h"
+#include "src/race/trackmodel.h"
+#include "src/cloud/uplinkmodel.h"
+#include "src/cloud/uplinkspool.h"
 
 namespace {
 

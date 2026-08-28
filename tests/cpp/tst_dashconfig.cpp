@@ -5,8 +5,8 @@
 #include <QFile>
 #include <QSettings>
 
-#include "src/dashconfig.h"
-#include "src/apppaths.h"
+#include "src/device/dashconfig.h"
+#include "src/core/apppaths.h"
 
 namespace {
 

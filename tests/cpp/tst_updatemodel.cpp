@@ -2,7 +2,7 @@
 #include <QSignalSpy>
 #include <QFile>
 
-#include "src/updatemodel.h"
+#include "src/device/updatemodel.h"
 
 class TestUpdateModel : public QObject {
     Q_OBJECT

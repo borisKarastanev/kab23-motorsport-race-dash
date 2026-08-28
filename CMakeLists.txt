@@ -47,33 +47,33 @@ qt_add_resources(RESOURCES resources.qrc)
 
 add_executable(bmw-e46-dash
     main.cpp
-    src/apppaths.h
-    src/logging.cpp
-    src/icanprovider.h
-    src/candatamodel.cpp
-    src/dashconfig.cpp
-    src/mockcanprovider.cpp
-    src/realcanprovider.cpp
-    src/raceboxdata.h
-    src/iraceprovider.h
-    src/raceboxmodel.cpp
-    src/mockraceboxprovider.cpp
-    src/raceboxprovider.cpp
-    src/optimallap.cpp
-    src/sessionmodel.cpp
-    src/trackmodel.cpp
-    src/logbuffermodel.cpp
-    src/devicestatsmodel.cpp
-    src/displaymodel.cpp
-    src/updatemodel.cpp
-    src/networkmodel.cpp
-    src/timemodel.cpp
-    src/sdnotify.cpp
-    src/icloudclient.h
-    src/cloudconfig.cpp
-    src/uplinkspool.cpp
-    src/mosquittocloudclient.cpp
-    src/uplinkmodel.cpp
+    src/core/apppaths.h
+    src/core/logging.cpp
+    src/can/icanprovider.h
+    src/can/candatamodel.cpp
+    src/device/dashconfig.cpp
+    src/can/mockcanprovider.cpp
+    src/can/realcanprovider.cpp
+    src/race/raceboxdata.h
+    src/race/iraceprovider.h
+    src/race/raceboxmodel.cpp
+    src/race/mockraceboxprovider.cpp
+    src/race/raceboxprovider.cpp
+    src/race/optimallap.cpp
+    src/race/sessionmodel.cpp
+    src/race/trackmodel.cpp
+    src/device/logbuffermodel.cpp
+    src/device/devicestatsmodel.cpp
+    src/device/displaymodel.cpp
+    src/device/updatemodel.cpp
+    src/device/networkmodel.cpp
+    src/device/timemodel.cpp
+    src/device/sdnotify.cpp
+    src/cloud/icloudclient.h
+    src/cloud/cloudconfig.cpp
+    src/cloud/uplinkspool.cpp
+    src/cloud/mosquittocloudclient.cpp
+    src/cloud/uplinkmodel.cpp
     ${RESOURCES}
 )
 
@@ -85,7 +85,7 @@ target_include_directories(bmw-e46-dash PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 # (CMakeLists.txt's PROJECT_VERSION, bumped for every release per the
 # versioning process) would force a full rebuild of all 18 .cpp files on
 # every in-app update — recompiling files whose source hadn't changed at all.
-set_source_files_properties(src/updatemodel.cpp PROPERTIES
+set_source_files_properties(src/device/updatemodel.cpp PROPERTIES
     COMPILE_DEFINITIONS "DASH_VERSION=\"${PROJECT_VERSION}\""
 )
 

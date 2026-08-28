@@ -6,10 +6,10 @@
 #include <QDir>
 #include <QMetaObject>
 
-#include "src/trackmodel.h"
-#include "src/raceboxmodel.h"
-#include "src/raceboxdata.h"
-#include "src/apppaths.h"
+#include "src/race/trackmodel.h"
+#include "src/race/raceboxmodel.h"
+#include "src/race/raceboxdata.h"
+#include "src/core/apppaths.h"
 
 namespace {
 

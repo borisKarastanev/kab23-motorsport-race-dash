@@ -7,28 +7,28 @@
 #include <QCommandLineParser>
 #include <QCursor>
 
-#include "src/realcanprovider.h"
-#include "src/mockcanprovider.h"
-#include "src/sdnotify.h"
-#include "src/candatamodel.h"
-#include "src/dashconfig.h"
-#include "src/raceboxmodel.h"
-#include "src/mockraceboxprovider.h"
-#include "src/sessionmodel.h"
-#include "src/trackmodel.h"
-#include "src/logging.h"
-#include "src/logbuffermodel.h"
-#include "src/devicestatsmodel.h"
-#include "src/displaymodel.h"
-#include "src/updatemodel.h"
-#include "src/networkmodel.h"
-#include "src/timemodel.h"
-#include "src/cloudconfig.h"
-#include "src/mosquittocloudclient.h"
-#include "src/uplinkmodel.h"
+#include "src/can/realcanprovider.h"
+#include "src/can/mockcanprovider.h"
+#include "src/device/sdnotify.h"
+#include "src/can/candatamodel.h"
+#include "src/device/dashconfig.h"
+#include "src/race/raceboxmodel.h"
+#include "src/race/mockraceboxprovider.h"
+#include "src/race/sessionmodel.h"
+#include "src/race/trackmodel.h"
+#include "src/core/logging.h"
+#include "src/device/logbuffermodel.h"
+#include "src/device/devicestatsmodel.h"
+#include "src/device/displaymodel.h"
+#include "src/device/updatemodel.h"
+#include "src/device/networkmodel.h"
+#include "src/device/timemodel.h"
+#include "src/cloud/cloudconfig.h"
+#include "src/cloud/mosquittocloudclient.h"
+#include "src/cloud/uplinkmodel.h"
 
 #ifdef HAVE_BLUETOOTH
-#include "src/raceboxprovider.h"
+#include "src/race/raceboxprovider.h"
 #endif
 
 int main(int argc, char *argv[])

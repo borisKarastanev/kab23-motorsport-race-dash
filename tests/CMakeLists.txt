@@ -17,7 +17,7 @@ add_test(NAME tst_canscaling COMMAND tst_canscaling)
 set_tests_properties(tst_canscaling PROPERTIES ENVIRONMENT "${DASH_TEST_ENV}")
 
 # ── candatamodel: CAN frame decode + RPM state machine ────────────────
-add_executable(tst_candatamodel cpp/tst_candatamodel.cpp ${APP_SRC_DIR}/src/candatamodel.cpp)
+add_executable(tst_candatamodel cpp/tst_candatamodel.cpp ${APP_SRC_DIR}/src/can/candatamodel.cpp)
 target_include_directories(tst_candatamodel PRIVATE ${APP_SRC_DIR})
 target_link_libraries(tst_candatamodel PRIVATE Qt6::Test Qt6::SerialBus)
 add_test(NAME tst_candatamodel COMMAND tst_candatamodel)
@@ -25,8 +25,8 @@ set_tests_properties(tst_candatamodel PROPERTIES ENVIRONMENT "${DASH_TEST_ENV}")
 
 # ── raceboxmodel: haversine + lap timing via onData() sequences ───────
 add_executable(tst_raceboxmodel cpp/tst_raceboxmodel.cpp
-    ${APP_SRC_DIR}/src/raceboxmodel.cpp
-    ${APP_SRC_DIR}/src/logging.cpp
+    ${APP_SRC_DIR}/src/race/raceboxmodel.cpp
+    ${APP_SRC_DIR}/src/core/logging.cpp
 )
 target_include_directories(tst_raceboxmodel PRIVATE ${APP_SRC_DIR})
 target_link_libraries(tst_raceboxmodel PRIVATE Qt6::Test)
@@ -34,7 +34,7 @@ add_test(NAME tst_raceboxmodel COMMAND tst_raceboxmodel)
 set_tests_properties(tst_raceboxmodel PROPERTIES ENVIRONMENT "${DASH_TEST_ENV}")
 
 # ── optimallap: shared optimal-lap rule, free functions, no Qt object ─
-add_executable(tst_optimallap cpp/tst_optimallap.cpp ${APP_SRC_DIR}/src/optimallap.cpp)
+add_executable(tst_optimallap cpp/tst_optimallap.cpp ${APP_SRC_DIR}/src/race/optimallap.cpp)
 target_include_directories(tst_optimallap PRIVATE ${APP_SRC_DIR})
 target_link_libraries(tst_optimallap PRIVATE Qt6::Test)
 add_test(NAME tst_optimallap COMMAND tst_optimallap)
@@ -42,8 +42,8 @@ set_tests_properties(tst_optimallap PROPERTIES ENVIRONMENT "${DASH_TEST_ENV}")
 
 # ── updatemodel: mock-mode update state machine ───────────────────────
 add_executable(tst_updatemodel cpp/tst_updatemodel.cpp
-    ${APP_SRC_DIR}/src/updatemodel.cpp
-    ${APP_SRC_DIR}/src/logging.cpp
+    ${APP_SRC_DIR}/src/device/updatemodel.cpp
+    ${APP_SRC_DIR}/src/core/logging.cpp
 )
 target_include_directories(tst_updatemodel PRIVATE ${APP_SRC_DIR})
 target_link_libraries(tst_updatemodel PRIVATE Qt6::Test Qt6::Network)
@@ -58,9 +58,9 @@ set_tests_properties(tst_updatemodel PROPERTIES ENVIRONMENT "${DASH_TEST_ENV}")
 # Uses QStandardPaths::setTestModeEnabled() (see tst_trackmodel.cpp) to sandbox
 # AppPaths-backed persistence away from the real user's data directory.
 add_executable(tst_trackmodel cpp/tst_trackmodel.cpp
-    ${APP_SRC_DIR}/src/trackmodel.cpp
-    ${APP_SRC_DIR}/src/raceboxmodel.cpp
-    ${APP_SRC_DIR}/src/logging.cpp
+    ${APP_SRC_DIR}/src/race/trackmodel.cpp
+    ${APP_SRC_DIR}/src/race/raceboxmodel.cpp
+    ${APP_SRC_DIR}/src/core/logging.cpp
 )
 target_include_directories(tst_trackmodel PRIVATE ${APP_SRC_DIR})
 target_link_libraries(tst_trackmodel PRIVATE Qt6::Test Qt6::Network)
@@ -72,12 +72,12 @@ set_tests_properties(tst_trackmodel PROPERTIES ENVIRONMENT "${DASH_TEST_ENV}")
 # saveCurrentSession() depends on); uses QStandardPaths::setTestModeEnabled()
 # to sandbox AppPaths-backed persistence away from the real user's sessions.
 add_executable(tst_sessionmodel cpp/tst_sessionmodel.cpp
-    ${APP_SRC_DIR}/src/sessionmodel.cpp
-    ${APP_SRC_DIR}/src/candatamodel.cpp
-    ${APP_SRC_DIR}/src/raceboxmodel.cpp
-    ${APP_SRC_DIR}/src/trackmodel.cpp
-    ${APP_SRC_DIR}/src/optimallap.cpp
-    ${APP_SRC_DIR}/src/logging.cpp
+    ${APP_SRC_DIR}/src/race/sessionmodel.cpp
+    ${APP_SRC_DIR}/src/can/candatamodel.cpp
+    ${APP_SRC_DIR}/src/race/raceboxmodel.cpp
+    ${APP_SRC_DIR}/src/race/trackmodel.cpp
+    ${APP_SRC_DIR}/src/race/optimallap.cpp
+    ${APP_SRC_DIR}/src/core/logging.cpp
 )
 target_include_directories(tst_sessionmodel PRIVATE ${APP_SRC_DIR})
 target_link_libraries(tst_sessionmodel PRIVATE Qt6::Test Qt6::SerialBus Qt6::Network)
@@ -89,8 +89,8 @@ set_tests_properties(tst_sessionmodel PROPERTIES ENVIRONMENT "${DASH_TEST_ENV}")
 # sandbox AppPaths-backed persistence, plus a fake sysfs backlight tree under
 # a QTemporaryDir passed to DisplayModel's constructor seam.
 add_executable(tst_displaymodel cpp/tst_displaymodel.cpp
-    ${APP_SRC_DIR}/src/displaymodel.cpp
-    ${APP_SRC_DIR}/src/logging.cpp
+    ${APP_SRC_DIR}/src/device/displaymodel.cpp
+    ${APP_SRC_DIR}/src/core/logging.cpp
 )
 target_include_directories(tst_displaymodel PRIVATE ${APP_SRC_DIR})
 target_link_libraries(tst_displaymodel PRIVATE Qt6::Test)
@@ -103,7 +103,7 @@ set_tests_properties(tst_displaymodel PROPERTIES ENVIRONMENT "${DASH_TEST_ENV}")
 # guard for the UI freeze: it fails if file I/O is put back inside the logging
 # critical section.
 add_executable(tst_logbuffermodel cpp/tst_logbuffermodel.cpp
-    ${APP_SRC_DIR}/src/logbuffermodel.cpp
+    ${APP_SRC_DIR}/src/device/logbuffermodel.cpp
 )
 target_include_directories(tst_logbuffermodel PRIVATE ${APP_SRC_DIR})
 target_link_libraries(tst_logbuffermodel PRIVATE Qt6::Test)
@@ -114,7 +114,7 @@ set_tests_properties(tst_logbuffermodel PROPERTIES ENVIRONMENT "${DASH_TEST_ENV}
 # Uses QStandardPaths::setTestModeEnabled() to sandbox AppPaths-backed
 # persistence away from the real user's dashboard.conf.
 add_executable(tst_dashconfig cpp/tst_dashconfig.cpp
-    ${APP_SRC_DIR}/src/dashconfig.cpp
+    ${APP_SRC_DIR}/src/device/dashconfig.cpp
 )
 target_include_directories(tst_dashconfig PRIVATE ${APP_SRC_DIR})
 target_link_libraries(tst_dashconfig PRIVATE Qt6::Test)
@@ -127,8 +127,8 @@ set_tests_properties(tst_dashconfig PROPERTIES ENVIRONMENT "${DASH_TEST_ENV}")
 # QTemporaryDir rather than QStandardPaths test mode because UplinkSpool takes
 # an explicit path seam (setDatabasePath) for exactly this.
 add_executable(tst_uplinkspool cpp/tst_uplinkspool.cpp
-    ${APP_SRC_DIR}/src/uplinkspool.cpp
-    ${APP_SRC_DIR}/src/logging.cpp
+    ${APP_SRC_DIR}/src/cloud/uplinkspool.cpp
+    ${APP_SRC_DIR}/src/core/logging.cpp
 )
 target_include_directories(tst_uplinkspool PRIVATE ${APP_SRC_DIR})
 target_link_libraries(tst_uplinkspool PRIVATE Qt6::Test Qt6::Sql)
@@ -143,15 +143,15 @@ set_tests_properties(tst_uplinkspool PROPERTIES ENVIRONMENT "${DASH_TEST_ENV}")
 add_executable(tst_uplinkmodel cpp/tst_uplinkmodel.cpp
     # Both are header-only Q_OBJECTs, so they must be listed for AUTOMOC to
     # generate their meta-objects — otherwise the signals link as undefined.
-    ${APP_SRC_DIR}/src/icloudclient.h
-    ${APP_SRC_DIR}/src/mockcloudclient.h
-    ${APP_SRC_DIR}/src/uplinkmodel.cpp
-    ${APP_SRC_DIR}/src/uplinkspool.cpp
-    ${APP_SRC_DIR}/src/cloudconfig.cpp
-    ${APP_SRC_DIR}/src/candatamodel.cpp
-    ${APP_SRC_DIR}/src/raceboxmodel.cpp
-    ${APP_SRC_DIR}/src/trackmodel.cpp
-    ${APP_SRC_DIR}/src/logging.cpp
+    ${APP_SRC_DIR}/src/cloud/icloudclient.h
+    ${APP_SRC_DIR}/src/cloud/mockcloudclient.h
+    ${APP_SRC_DIR}/src/cloud/uplinkmodel.cpp
+    ${APP_SRC_DIR}/src/cloud/uplinkspool.cpp
+    ${APP_SRC_DIR}/src/cloud/cloudconfig.cpp
+    ${APP_SRC_DIR}/src/can/candatamodel.cpp
+    ${APP_SRC_DIR}/src/race/raceboxmodel.cpp
+    ${APP_SRC_DIR}/src/race/trackmodel.cpp
+    ${APP_SRC_DIR}/src/core/logging.cpp
 )
 target_include_directories(tst_uplinkmodel PRIVATE ${APP_SRC_DIR})
 target_link_libraries(tst_uplinkmodel PRIVATE Qt6::Test Qt6::Sql Qt6::SerialBus Qt6::Network)
@@ -162,8 +162,8 @@ set_tests_properties(tst_uplinkmodel PROPERTIES ENVIRONMENT "${DASH_TEST_ENV}")
 # Uses QStandardPaths::setTestModeEnabled() to sandbox cloud.conf away from the
 # real user's paired credential.
 add_executable(tst_cloudconfig cpp/tst_cloudconfig.cpp
-    ${APP_SRC_DIR}/src/cloudconfig.cpp
-    ${APP_SRC_DIR}/src/logging.cpp
+    ${APP_SRC_DIR}/src/cloud/cloudconfig.cpp
+    ${APP_SRC_DIR}/src/core/logging.cpp
 )
 target_include_directories(tst_cloudconfig PRIVATE ${APP_SRC_DIR})
 target_link_libraries(tst_cloudconfig PRIVATE Qt6::Test)
@@ -179,9 +179,9 @@ set_tests_properties(tst_cloudconfig PROPERTIES ENVIRONMENT "${DASH_TEST_ENV}")
 # through a RaceBoxModel* for the GPS time source (unused, passed as nullptr,
 # in every test here).
 add_executable(tst_timemodel cpp/tst_timemodel.cpp
-    ${APP_SRC_DIR}/src/timemodel.cpp
-    ${APP_SRC_DIR}/src/raceboxmodel.cpp
-    ${APP_SRC_DIR}/src/logging.cpp
+    ${APP_SRC_DIR}/src/device/timemodel.cpp
+    ${APP_SRC_DIR}/src/race/raceboxmodel.cpp
+    ${APP_SRC_DIR}/src/core/logging.cpp
 )
 target_include_directories(tst_timemodel PRIVATE ${APP_SRC_DIR})
 target_link_libraries(tst_timemodel PRIVATE Qt6::Test Qt6::Network)
