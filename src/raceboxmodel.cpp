@@ -1,6 +1,5 @@
 #include "raceboxmodel.h"
 #include "logging.h"
-#include <QTimeZone>
 #include <algorithm>
 #include <cmath>
 #include <limits>
@@ -375,7 +374,7 @@ void RaceBoxModel::onData(const RaceBoxData &d)
     // say "valid" while m_gpsUtc is null, and syncFromGps() would shell out a
     // garbage timestamp having already disabled NTP.
     const QDateTime candidate(QDate(d.gnssYear, d.gnssMonth, d.gnssDay),
-                              QTime(d.gnssHour, d.gnssMinute, d.gnssSecond), QTimeZone::UTC);
+                              QTime(d.gnssHour, d.gnssMinute, d.gnssSecond), Qt::UTC);
     // Cleared, not left stale, when the reading isn't trustworthy: a null
     // m_gpsUtc is exactly what gpsTimeValid() reports.
     m_gpsUtc = (fix && (d.gnssValidFlags & 0x04) && candidate.isValid()) ? candidate : QDateTime();
