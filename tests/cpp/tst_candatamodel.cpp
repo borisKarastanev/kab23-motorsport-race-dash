@@ -2,8 +2,8 @@
 #include <QSignalSpy>
 #include <QCanBusFrame>
 
-#include "src/candatamodel.h"
-#include "src/canscaling.h"
+#include "src/can/candatamodel.h"
+#include "src/core/canscaling.h"
 
 namespace {
 

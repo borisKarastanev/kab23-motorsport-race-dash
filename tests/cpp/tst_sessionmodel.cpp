@@ -8,11 +8,11 @@
 #include <QJsonArray>
 #include <QJsonObject>
 
-#include "src/sessionmodel.h"
-#include "src/candatamodel.h"
-#include "src/raceboxmodel.h"
-#include "src/trackmodel.h"
-#include "src/apppaths.h"
+#include "src/race/sessionmodel.h"
+#include "src/can/candatamodel.h"
+#include "src/race/raceboxmodel.h"
+#include "src/race/trackmodel.h"
+#include "src/core/apppaths.h"
 
 namespace {
 

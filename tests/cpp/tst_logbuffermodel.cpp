@@ -6,7 +6,7 @@
 #include <atomic>
 #include <vector>
 
-#include "src/logbuffermodel.h"
+#include "src/device/logbuffermodel.h"
 
 // Regression guard for the Device Log freeze (fixed twice now — see below).
 //

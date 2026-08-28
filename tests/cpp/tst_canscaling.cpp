@@ -1,7 +1,7 @@
 #include <QTest>
 #include <cmath>
 
-#include "src/canscaling.h"
+#include "src/core/canscaling.h"
 
 class TestCanScaling : public QObject {
     Q_OBJECT

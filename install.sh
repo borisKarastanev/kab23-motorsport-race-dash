@@ -58,7 +58,7 @@ fc-cache -f
 step "Migrating legacy user data out of build/"
 # The app now stores all persistent user data in a stable per-user directory
 # (QStandardPaths AppDataLocation -> ~/.local/share/bmw-e46-dash, see
-# src/apppaths.h) that no build step ever touches. Earlier versions stored it
+# src/core/apppaths.h) that no build step ever touches. Earlier versions stored it
 # next to the binary — QCoreApplication::applicationDirPath() resolves to
 # build/ — so a device updating from such a version still has irreplaceable race
 # data sitting inside build/ that the wipe below would destroy. Move it into the

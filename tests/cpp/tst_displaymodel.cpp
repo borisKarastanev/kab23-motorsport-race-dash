@@ -8,8 +8,8 @@
 #include <QSettings>
 #include <cmath>
 
-#include "src/displaymodel.h"
-#include "src/apppaths.h"
+#include "src/device/displaymodel.h"
+#include "src/core/apppaths.h"
 
 namespace {
 

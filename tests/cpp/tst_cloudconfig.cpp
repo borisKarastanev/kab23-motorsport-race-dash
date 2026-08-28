@@ -4,8 +4,8 @@
 #include <QFileInfo>
 #include <QStandardPaths>
 
-#include "src/apppaths.h"
-#include "src/cloudconfig.h"
+#include "src/core/apppaths.h"
+#include "src/cloud/cloudconfig.h"
 
 // cloud.conf holds a live broker credential, so these tests are about the
 // handling rules rather than the getters: the file must be 0600, the secret

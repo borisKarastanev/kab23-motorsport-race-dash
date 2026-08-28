@@ -2,7 +2,7 @@
 #include <QRegularExpression>
 #include <QTemporaryDir>
 
-#include "src/uplinkspool.h"
+#include "src/cloud/uplinkspool.h"
 
 namespace {
 

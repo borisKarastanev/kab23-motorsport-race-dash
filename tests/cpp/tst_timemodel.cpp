@@ -8,8 +8,8 @@
 #include <QFile>
 #include <QRegularExpression>
 
-#include "src/timemodel.h"
-#include "src/apppaths.h"
+#include "src/device/timemodel.h"
+#include "src/core/apppaths.h"
 
 namespace {
 
