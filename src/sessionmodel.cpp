@@ -143,6 +143,11 @@ void SessionModel::saveCurrentSession()
     QJsonObject record;
     record["title"]         = now.toString("yyyy-MM-dd HH:mm");
     record["timestampIso"]  = now.toString(Qt::ISODate);
+    // Zone-proof and unambiguous, unlike the two frozen-local-time strings
+    // above — see the timezone-settings plan. Additive only: timestampIso
+    // stays the primary key (SessionModel::deleteSession) and nothing reads
+    // this yet, but load()/persist() round-trip unknown keys verbatim.
+    record["timestampUtcMs"] = now.toMSecsSinceEpoch();
     record["lapMs"]         = lapArray;
     record["lapPaths"]      = pathsArray;
     record["topSpeedKmh"]   = m_topSpeedKmh;

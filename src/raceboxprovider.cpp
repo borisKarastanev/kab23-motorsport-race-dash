@@ -201,6 +201,13 @@ void RaceBoxProvider::tryParsePacket()
         const uchar *p = reinterpret_cast<const uchar *>(m_buffer.constData() + 6);
 
         RaceBoxData d;
+        d.gnssYear       = qFromLittleEndian<quint16>(p + 4);
+        d.gnssMonth      = p[6];
+        d.gnssDay        = p[7];
+        d.gnssHour       = p[8];
+        d.gnssMinute     = p[9];
+        d.gnssSecond     = p[10];
+        d.gnssValidFlags = p[11];
         d.fixStatus  = p[20];
         d.fixFlags   = p[21];
         d.numSvs     = p[23];

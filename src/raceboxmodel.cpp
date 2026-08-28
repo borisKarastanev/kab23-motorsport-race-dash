@@ -1,5 +1,6 @@
 #include "raceboxmodel.h"
 #include "logging.h"
+#include <QTimeZone>
 #include <algorithm>
 #include <cmath>
 #include <limits>
@@ -366,6 +367,18 @@ void RaceBoxModel::onData(const RaceBoxData &d)
     }
 
     if (m_satellites != d.numSvs) { m_satellites = d.numSvs; m_dirty |= kDirtySvs; }
+
+    // fullyResolved (bit 2) is required alongside the fix itself: validDate/
+    // validTime alone can still be a rough, un-settled receiver estimate.
+    // isValid() is not redundant on top of that: UBX-NAV-PVT specifies sec as
+    // 0..60 (leap second), and QTime rejects 60 — without this the flag would
+    // say "valid" while m_gpsUtc is null, and syncFromGps() would shell out a
+    // garbage timestamp having already disabled NTP.
+    const QDateTime candidate(QDate(d.gnssYear, d.gnssMonth, d.gnssDay),
+                              QTime(d.gnssHour, d.gnssMinute, d.gnssSecond), QTimeZone::UTC);
+    // Cleared, not left stale, when the reading isn't trustworthy: a null
+    // m_gpsUtc is exactly what gpsTimeValid() reports.
+    m_gpsUtc = (fix && (d.gnssValidFlags & 0x04) && candidate.isValid()) ? candidate : QDateTime();
 
     const double gx = d.gForceXMg / 1000.0;
     const double gy = d.gForceYMg / 1000.0;

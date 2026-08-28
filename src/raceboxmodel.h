@@ -7,6 +7,7 @@
 #include <QVariantList>
 #include <QVector>
 #include <QList>
+#include <QDateTime>
 
 // One completed lap, reported the instant it finishes — see
 // RaceBoxModel::lapCompleted() below. Declared at file scope rather than
@@ -95,6 +96,17 @@ public:
     bool   canLearnFinishLine() const;
     // Single source of truth for the lap-timer lifecycle (see LapTimerState).
     LapTimerState lapTimerState() const;
+    // GPS UTC, decoded from the UBX-NAV-PVT time block already present in the
+    // RaceBox packet (see onData()) and fed to TimeModel's "SYNC FROM GPS"
+    // offline time source. Plain getters, not properties: TimeModel pulls them
+    // on its own 1 Hz tick — and must read the time *at the moment the button
+    // is tapped*, so a latched, notify-driven copy would be stale by seconds.
+    // Same convention as lastLat()/lastLon() below.
+    //
+    // Validity is the datetime's own: onData() clears m_gpsUtc whenever the
+    // reading isn't trustworthy, so there is no second bool to keep in sync.
+    bool      gpsTimeValid() const { return m_gpsUtc.isValid(); }
+    QDateTime gpsUtc()       const { return m_gpsUtc; }
 
     // Sets the start/finish line as a gate: a segment between two GPS points
     // (A→B) spanning the track width. A lap is timed when the car's path crosses
@@ -339,6 +351,10 @@ private:
     double m_maxLonG        = 0.0;
     int    m_batteryPercent  = 0;
     bool   m_batteryCharging = false;
+
+    // GPS UTC time, decoded from the UBX-NAV-PVT time block. Null whenever the
+    // reading isn't trustworthy — that null IS gpsTimeValid()'s answer.
+    QDateTime m_gpsUtc;
 
     // Dirty bits
     static constexpr quint16 kDirtyConnected   = 0x001;

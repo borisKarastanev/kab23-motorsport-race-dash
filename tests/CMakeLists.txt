@@ -170,6 +170,24 @@ target_link_libraries(tst_cloudconfig PRIVATE Qt6::Test)
 add_test(NAME tst_cloudconfig COMMAND tst_cloudconfig)
 set_tests_properties(tst_cloudconfig PROPERTIES ENVIRONMENT "${DASH_TEST_ENV}")
 
+# ── timemodel: region/zone splitting, offset formatting, geolocation ──
+# validation, and the set-ntp-before-set-time ordering guarantee. The ordering
+# test constructs TimeModel with mockMode=false against fake timedatectl/nmcli
+# binaries on PATH (see tst_timemodel.cpp) rather than the real system tools —
+# mock mode's setManualDateTime never shells out at all, so it can't
+# demonstrate that ordering. Links RaceBoxModel because TimeModel calls
+# through a RaceBoxModel* for the GPS time source (unused, passed as nullptr,
+# in every test here).
+add_executable(tst_timemodel cpp/tst_timemodel.cpp
+    ${APP_SRC_DIR}/src/timemodel.cpp
+    ${APP_SRC_DIR}/src/raceboxmodel.cpp
+    ${APP_SRC_DIR}/src/logging.cpp
+)
+target_include_directories(tst_timemodel PRIVATE ${APP_SRC_DIR})
+target_link_libraries(tst_timemodel PRIVATE Qt6::Test Qt6::Network)
+add_test(NAME tst_timemodel COMMAND tst_timemodel)
+set_tests_properties(tst_timemodel PROPERTIES ENVIRONMENT "${DASH_TEST_ENV}")
+
 # ── QML (Qt Quick Test) ────────────────────────────────────────────────
 # Test .qml files load the real qml/*.qml sources directly off disk via
 # relative directory imports (not through the app's compiled qrc resources),
