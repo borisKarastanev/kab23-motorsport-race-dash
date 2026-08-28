@@ -141,6 +141,26 @@ polkit.addRule(function(action, subject) {
 });
 RULES
 
+step "Enabling system clock control for the dashboard user"
+# Date & Time settings shell out to timedatectl (org.freedesktop.timedate1.*
+# polkit actions) as the dashboard user, no sudo — a settings page must not
+# prompt for a password in a car (see UpdateModel, which does need one because
+# it runs install.sh). Same "no active logind session" gap as the
+# NetworkManager rule above, so the stock "active session" polkit rule doesn't
+# apply here either; netdev is reused since the dashboard user is already in
+# that group.
+sudo mkdir -p /etc/polkit-1/rules.d
+sudo tee /etc/polkit-1/rules.d/50-race-dash-timedate.rules > /dev/null << 'RULES'
+polkit.addRule(function(action, subject) {
+    if (action.id.indexOf("org.freedesktop.timedate1.") === 0 &&
+        subject.isInGroup("netdev")) {
+        return polkit.Result.YES;
+    }
+});
+RULES
+# The Pi has no RTC; reading it as local time makes every DST/zone change wrong.
+sudo timedatectl set-local-rtc 0 || true
+
 step "Granting backlight brightness control"
 # The Display settings page (DisplayModel) writes
 # /sys/class/backlight/*/brightness directly. That node is normally

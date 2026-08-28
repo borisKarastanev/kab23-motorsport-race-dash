@@ -14,7 +14,7 @@ if(CCACHE_PROGRAM)
     set(CMAKE_CXX_COMPILER_LAUNCHER "${CCACHE_PROGRAM}")
 endif()
 
-project(bmw-e46-dash VERSION 3.0.1 LANGUAGES CXX)
+project(bmw-e46-dash VERSION 3.1.1 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -67,6 +67,7 @@ add_executable(bmw-e46-dash
     src/displaymodel.cpp
     src/updatemodel.cpp
     src/networkmodel.cpp
+    src/timemodel.cpp
     src/sdnotify.cpp
     src/icloudclient.h
     src/cloudconfig.cpp

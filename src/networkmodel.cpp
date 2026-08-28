@@ -1,4 +1,5 @@
 #include "networkmodel.h"
+#include "procrunner.h"
 #include "logging.h"
 
 #include <QProcess>
@@ -432,8 +433,7 @@ QString NetworkModel::prefixToMask(int prefix)
 
 QString NetworkModel::lastNonEmptyLine(const QString &text)
 {
-    const QStringList lines = text.split('\n', Qt::SkipEmptyParts);
-    return lines.isEmpty() ? QString() : lines.last().trimmed();
+    return Proc::lastNonEmptyLine(text);
 }
 
 void NetworkModel::parseDevStatus(const QString &output)
@@ -547,43 +547,7 @@ void NetworkModel::parseKnownProfiles(const QString &output)
 void NetworkModel::runNmcli(const QStringList &args, int timeoutMs,
                              std::function<void(bool ok, int exitCode, const QString &out)> onDone)
 {
-    QProcess *proc = new QProcess(this);
-    proc->setProcessChannelMode(QProcess::MergedChannels);
-
-    auto outputBuf = std::make_shared<QString>();
-    auto doneFlag = std::make_shared<bool>(false);
-
-    connect(proc, &QProcess::readyReadStandardOutput, this, [proc, outputBuf]() {
-        *outputBuf += QString::fromUtf8(proc->readAllStandardOutput());
-    });
-
-    connect(proc, QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished), this,
-        [proc, outputBuf, doneFlag, onDone](int exitCode, QProcess::ExitStatus status) {
-            if (*doneFlag)
-                return;
-            *doneFlag = true;
-            const bool ok = (status == QProcess::NormalExit && exitCode == 0);
-            onDone(ok, exitCode, *outputBuf);
-            proc->deleteLater();
-        });
-
-    connect(proc, &QProcess::errorOccurred, this,
-        [proc, doneFlag, onDone](QProcess::ProcessError err) {
-            if (err != QProcess::FailedToStart || *doneFlag)
-                return;
-            *doneFlag = true;
-            onDone(false, -1, QStringLiteral("nmcli not found or failed to start"));
-            proc->deleteLater();
-        });
-
-    if (timeoutMs > 0) {
-        QTimer::singleShot(timeoutMs, proc, [proc]() {
-            if (proc->state() != QProcess::NotRunning)
-                proc->kill();
-        });
-    }
-
-    proc->start(QStringLiteral("nmcli"), args);
+    Proc::run(this, QStringLiteral("nmcli"), args, timeoutMs, std::move(onDone));
 }
 
 // ── mock mode ─────────────────────────────────────────────────────────

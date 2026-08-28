@@ -1,41 +1,33 @@
 import QtQuick 2.15
 
+// Settings > Device Settings > Date & Time > Time Zone — region drill-in.
+// Same delegate shape as DeviceInfoMenu.qml.
 Item {
     id: root
     property var stackView: null
 
-    ListModel {
-        id: menuModel
-        ListElement { itemTitle: "APP VERSION";  itemKey: "device-version" }
-        ListElement { itemTitle: "DEVICE STATS";  itemKey: "device-stats" }
-        ListElement { itemTitle: "DEVICE LOG";    itemKey: "device-log" }
-        ListElement { itemTitle: "DISPLAY";       itemKey: "display" }
-        ListElement { itemTitle: "DATE & TIME";   itemKey: "timezone" }
-        ListElement { itemTitle: "NETWORK CONNECTION"; itemKey: "network" }
-        ListElement { itemTitle: "CLOUD UPLINK";       itemKey: "cloud-uplink" }
-    }
-
     ListView {
         anchors.fill: parent
-        model: menuModel
+        model: timeModel.regions
         clip: true
 
         delegate: Item {
             width: ListView.view.width
-            height: 60
+            height: 48
 
             Rectangle {
                 anchors.fill: parent
                 color: rowArea.pressed ? "#111111" : "#0d0d0d"
 
                 Text {
-                    anchors.centerIn: parent
-                    text: itemTitle
+                    anchors.left: parent.left
+                    anchors.leftMargin: 16
+                    anchors.verticalCenter: parent.verticalCenter
+                    text: modelData
                     color: "#cccccc"
                     font.pixelSize: 12
-                    font.bold: true
                     font.family: "monospace"
-                    font.letterSpacing: 2
+                    font.letterSpacing: 1
                 }
 
                 Text {
@@ -51,12 +43,11 @@ Item {
                 MouseArea {
                     id: rowArea
                     anchors.fill: parent
-                    onClicked: {
-                        root.stackView.push("qrc:/qml/SettingsDetail.qml", {
-                            settingKey: itemKey,
-                            title: itemTitle
-                        })
-                    }
+                    onClicked: root.stackView.push("qrc:/qml/SettingsDetail.qml", {
+                        settingKey: "timezone-zones",
+                        title: modelData,
+                        payload: { region: modelData }
+                    })
                 }
             }
 
@@ -64,10 +55,10 @@ Item {
                 anchors.bottom: parent.bottom
                 anchors.left: parent.left
                 anchors.right: parent.right
-                anchors.leftMargin: 20
-                anchors.rightMargin: 20
+                anchors.leftMargin: 16
+                anchors.rightMargin: 16
                 height: 1
-                color: "#2a2a2a"
+                color: "#1a1a1a"
             }
         }
     }

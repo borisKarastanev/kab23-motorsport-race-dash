@@ -30,6 +30,9 @@ Item {
     Component { id: compDeviceLog;      DeviceLog {} }
     Component { id: compDisplay;        DisplaySettings {} }
     Component { id: compCloudUplink;    CloudUplinkDetail {} }
+    Component { id: compTimezone;         TimeZoneDetail {} }
+    Component { id: compTimezoneRegions;  TimeZoneRegionList {} }
+    Component { id: compTimezoneZones;    TimeZoneZoneList {} }
 
     function registryFor(key) {
         switch (key) {
@@ -49,6 +52,9 @@ Item {
             case "device-log":      return compDeviceLog
             case "display":         return compDisplay
             case "cloud-uplink":    return compCloudUplink
+            case "timezone":         return compTimezone
+            case "timezone-regions": return compTimezoneRegions
+            case "timezone-zones":   return compTimezoneZones
             default:                return compLayout
         }
     }

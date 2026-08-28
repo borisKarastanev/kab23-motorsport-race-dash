@@ -20,6 +20,13 @@ struct RaceBoxData {
     quint8  fixFlags;    // bit 0 = valid fix
     quint8  numSvs;      // satellites used in solution
 
+    // UBX-NAV-PVT time block (bytes 4-11 of the payload). bit 0 of
+    // gnssValidFlags = validDate, bit 1 = validTime, bit 2 = fullyResolved —
+    // RaceBoxModel accepts the reading only once bit 2 is set, alongside fixStatus/fixFlags.
+    quint16 gnssYear;
+    quint8  gnssMonth, gnssDay, gnssHour, gnssMinute, gnssSecond;
+    quint8  gnssValidFlags;
+
     double  latitude;    // degrees (Int32 × 10^-7)
     double  longitude;   // degrees (Int32 × 10^-7)
 

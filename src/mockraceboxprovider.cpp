@@ -1,4 +1,5 @@
 #include "mockraceboxprovider.h"
+#include <QDateTime>
 #include <cmath>
 
 // Simulation parameters. kLapCount is the number of speed-profile laps driven,
@@ -76,12 +77,30 @@ void MockRaceBoxProvider::onTick()
         }
     }
 
-    RaceBoxData d;
+    // Value-initialized: RaceBoxData has no default member initializers, so a
+    // plain `RaceBoxData d;` leaves every unassigned field indeterminate. The
+    // stationary branch below assigns only lat/lon and relies on speedMmS being
+    // zero — without the braces it inherits the previous tick's stack slot and
+    // the "parked" phase reports the last lap's speed.
+    RaceBoxData d{};
     d.fixStatus  = 3;
     d.fixFlags   = 0x01;
     d.numSvs     = 12;
     d.gForceZMg  = 1000; // ~1g vertical in both phases
     d.batteryRaw = 85;
+
+    // RaceBoxData is hand-constructed here (no wire decode), so the GNSS time
+    // block needs seeding too, or it would be left uninitialised. The mock's
+    // wall clock is the dev box's real clock, which is exactly what TimeModel's
+    // SYNC FROM GPS exercises against under --mock.
+    const QDateTime utcNow = QDateTime::currentDateTimeUtc();
+    d.gnssYear       = utcNow.date().year();
+    d.gnssMonth      = utcNow.date().month();
+    d.gnssDay        = utcNow.date().day();
+    d.gnssHour       = utcNow.time().hour();
+    d.gnssMinute     = utcNow.time().minute();
+    d.gnssSecond     = utcNow.time().second();
+    d.gnssValidFlags = 0x07; // validDate | validTime | fullyResolved
 
     // Stationary phase — 15 s at speed 0 so the Save Session button can be used
     if (m_stopped) {
@@ -94,7 +113,8 @@ void MockRaceBoxProvider::onTick()
 
         d.latitude  = kTrackLat + kTrackRadius;
         d.longitude = kTrackLon;
-        // speedMmS, gForceXMg, gForceYMg are zero-initialised
+        // speedMmS, gForceXMg, gForceYMg stay zero from the `RaceBoxData d{}`
+        // value-initialization above — that's what makes this phase "parked".
         emit dataReady(d);
         return;
     }

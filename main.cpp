@@ -22,6 +22,7 @@
 #include "src/displaymodel.h"
 #include "src/updatemodel.h"
 #include "src/networkmodel.h"
+#include "src/timemodel.h"
 #include "src/cloudconfig.h"
 #include "src/mosquittocloudclient.h"
 #include "src/uplinkmodel.h"
@@ -79,6 +80,7 @@ int main(int argc, char *argv[])
     DeviceStatsModel deviceStatsModel;
     DisplayModel     displayModel;
     NetworkModel     networkModel(useMock);
+    TimeModel        timeModel(useMock, &raceBoxModel);
 
     // Finish lines are owned by TrackModel and applied below via
     // applyStartupFinishLine(). Mock mode seeds a synthetic line (once — skipped
@@ -177,6 +179,7 @@ int main(int argc, char *argv[])
     engine.rootContext()->setContextProperty("deviceStatsModel", &deviceStatsModel);
     engine.rootContext()->setContextProperty("displayModel",    &displayModel);
     engine.rootContext()->setContextProperty("networkModel",    &networkModel);
+    engine.rootContext()->setContextProperty("timeModel",       &timeModel);
     engine.rootContext()->setContextProperty("logBuffer",       &logBuffer);
     engine.rootContext()->setContextProperty("uplinkModel",     &uplinkModel);
     engine.rootContext()->setContextProperty("cloudConfig",     &cloudConfig);
@@ -206,7 +209,15 @@ int main(int argc, char *argv[])
     // Queued, not direct: frameSwapped is emitted on the render thread, and
     // unlike sdNotifyReady (which only writes to an OS socket) UplinkModel is
     // main-thread state.
-    const auto startUplink = [&uplinkModel] { uplinkModel.start(); };
+    // TimeModel rides the same hook and for the same reason: its first status
+    // read spawns timedatectl (which D-Bus-activates systemd-timedated) and
+    // nmcli, and a first-run bootstrap adds an SD-card write. None of that may
+    // sit between boot and the first frame, and nothing reads the model until
+    // the Date & Time settings page is opened.
+    const auto startDeferred = [&uplinkModel, &timeModel] {
+        uplinkModel.start();
+        timeModel.start();
+    };
 
     // The other end of the same lifecycle. A session is opened by the lap timer
     // but was only ever closed by the driver tapping Save Session, so a stint
@@ -221,12 +232,12 @@ int main(int argc, char *argv[])
         QObject::connect(window, &QQuickWindow::frameSwapped, window,
                           &sdNotifyReady, Qt::SingleShotConnection);
         QObject::connect(window, &QQuickWindow::frameSwapped, &uplinkModel,
-                          startUplink,
+                          startDeferred,
                           Qt::ConnectionType(Qt::QueuedConnection | Qt::SingleShotConnection));
     } else {
         sdNotifyReady(); // no window to hook (shouldn't happen) — notify anyway so
                          // systemd doesn't wait out the full start timeout for nothing
-        startUplink();
+        startDeferred();
     }
 
     canProvider->start();

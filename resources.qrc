@@ -38,6 +38,10 @@
         <file>qml/settings/ToggleRow.qml</file>
         <file>qml/settings/CloudUplinkDetail.qml</file>
         <file>qml/settings/TextEntryModal.qml</file>
+        <file>qml/settings/TimeZoneDetail.qml</file>
+        <file>qml/settings/TimeZoneRegionList.qml</file>
+        <file>qml/settings/TimeZoneZoneList.qml</file>
+        <file>qml/settings/DateTimeModal.qml</file>
         <file>qml/Gauge.qml</file>
         <file>qml/GearIndicator.qml</file>
         <file>qml/LedStrip.qml</file>
