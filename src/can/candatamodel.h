@@ -59,12 +59,12 @@ public:
     double wheelSpeedFR()  const { return m_wheels[FR]; }
     double wheelSpeedRL()  const { return m_wheels[RL]; }
     double wheelSpeedRR()  const { return m_wheels[RR]; }
-    double steeringAngle() const { return m_steeringAngle; }
-    bool   steeringValid() const { return m_steeringValid; }
-    bool   brakePressed()  const { return m_brakePressed; }
-    bool   brakeValid()    const { return m_brakeValid; }
-    double throttle()      const { return m_throttle; }
-    bool   throttleValid() const { return m_throttleValid; }
+    double steeringAngle() const { return m_steering.value; }
+    bool   steeringValid() const { return m_steering.valid; }
+    bool   brakePressed()  const { return m_brake.value; }
+    bool   brakeValid()    const { return m_brake.valid; }
+    double throttle()      const { return m_throttle.value; }
+    bool   throttleValid() const { return m_throttle.valid; }
     int    gear()        const { return m_gear; }
 
     // A wheel-speed reading older than this no longer drives speed — the GPS
@@ -108,8 +108,19 @@ private:
 
     enum Wheel { FL, FR, RL, RR }; // matches the 0x1F0 field order
 
+    // A driver input: its value, whether that value is live, and when its
+    // frame last arrived. While invalid, value holds the neutral T{}.
+    template <typename T>
+    struct Input {
+        T value{};
+        bool valid = false;
+        QElapsedTimer clock; // restarted on every frame; invalid until the first
+    };
+
     static bool fresh(const QElapsedTimer &clock, qint64 staleMs);
     bool wheelSpeedFresh() const;
+    template <typename T> void updateInput(Input<T> &in, T value, bool valid, quint16 dirtyBit);
+    template <typename T> void expireInput(Input<T> &in, quint16 dirtyBit);
     void expireStaleInputs();
     int  vehicleSpeedFromWheels() const;
     void applySpeed(int kmh);
@@ -123,16 +134,9 @@ private:
     int    m_gpsSpeed    = 0;
     bool   m_speedFromWheels = false;
     std::array<double, 4> m_wheels{};
-    double m_steeringAngle = 0.0;
-    bool   m_steeringValid = false;
-    bool   m_brakePressed  = false;
-    bool   m_brakeValid    = false;
-    double m_throttle      = 0.0;
-    bool   m_throttleValid = false;
-    // Restarted on every frame of the matching ID; invalid until the first.
-    QElapsedTimer m_steeringClock;
-    QElapsedTimer m_brakeClock;
-    QElapsedTimer m_throttleClock;
+    Input<double> m_steering;
+    Input<bool>   m_brake;
+    Input<double> m_throttle;
     QElapsedTimer m_wheelSpeedClock; // restarted on every 0x1F0; invalid until the first
     int    m_gear        = 0;
 

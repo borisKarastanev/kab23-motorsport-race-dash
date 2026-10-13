@@ -8,10 +8,12 @@ Item {
     property real   value: 0          // 0..100
     property color  fillColor: "#33cc66"
     property bool   valid: true
-    property string valueText: valid ? Math.round(clampedValue) + "%" : "--"
+    property bool   binary: false     // on/off signal: shows ON/OFF instead of %
+    property string valueText: !valid ? "--"
+                             : binary ? (clampedValue > 0 ? "ON" : "OFF")
+                             : Math.round(clampedValue) + "%"
 
     readonly property real clampedValue: Math.max(0, Math.min(100, value))
-    readonly property alias fillHeight: fill.height
 
     implicitWidth: 72
 
@@ -39,16 +41,13 @@ Item {
 
         Rectangle {
             id: fill
+            objectName: "fill"
             anchors.left: parent.left
             anchors.right: parent.right
             anchors.bottom: parent.bottom
             anchors.margins: 2
             height: root.valid ? (track.height - 4) * root.clampedValue / 100 : 0
             color: root.fillColor
-            radius: 1
-
-            // CanDataModel notifies at 10 Hz — ease between steps.
-            Behavior on height { NumberAnimation { duration: 100 } }
         }
     }
 

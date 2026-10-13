@@ -40,7 +40,7 @@ constexpr quint8 kThrottleRawMin   = 0x01;
 constexpr quint8 kThrottleRawMax   = 0xFE;
 constexpr quint8 kThrottleRawInit  = 0x00;
 constexpr quint8 kThrottleRawError = 0xFF;
-inline bool   throttleRawValid(quint8 b) { return b != kThrottleRawInit && b != kThrottleRawError; }
+inline bool   throttleRawValid(quint8 b) { return b >= kThrottleRawMin && b <= kThrottleRawMax; }
 inline double decodeThrottle(quint8 b)
 {
     const double pct = (static_cast<double>(b) - kThrottleRawMin) * 100.0 / (kThrottleRawMax - kThrottleRawMin);

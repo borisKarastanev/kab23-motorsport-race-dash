@@ -37,15 +37,9 @@ void CanDataModel::onFrame(const QCanBusFrame &frame)
         }
         if (p.size() >= CanScaling::kOffsetThrottle + 1) {
             const auto raw = static_cast<quint8>(p[CanScaling::kOffsetThrottle]);
-            const bool valid = CanScaling::throttleRawValid(raw);
             // Init/PVS error reads as a closed pedal, never the pre-fault value.
-            const double pct = valid ? CanScaling::decodeThrottle(raw) : 0.0;
-            m_throttleClock.start();
-            if (valid != m_throttleValid || pct != m_throttle) {
-                m_throttleValid = valid;
-                m_throttle = pct;
-                m_dirty |= kDirtyThrottle;
-            }
+            updateInput(m_throttle, CanScaling::decodeThrottle(raw),
+                        CanScaling::throttleRawValid(raw), kDirtyThrottle);
         }
         break;
 
@@ -81,25 +75,15 @@ void CanDataModel::onFrame(const QCanBusFrame &frame)
 
     case CanScaling::kFrameSteering:
         if (p.size() >= CanScaling::kOffsetSteering + 2) {
-            const double angle = CanScaling::decodeSteering(p.constData() + CanScaling::kOffsetSteering);
-            m_steeringClock.start();
-            if (angle != m_steeringAngle || !m_steeringValid) {
-                m_steeringAngle = angle;
-                m_steeringValid = true;
-                m_dirty |= kDirtySteering;
-            }
+            updateInput(m_steering, CanScaling::decodeSteering(p.constData() + CanScaling::kOffsetSteering),
+                        true, kDirtySteering);
         }
         break;
 
     case CanScaling::kFrameAsc1:
         if (p.size() >= CanScaling::kOffsetBrake + 1) {
             const bool pressed = static_cast<quint8>(p[CanScaling::kOffsetBrake]) & CanScaling::kBrakeBit;
-            m_brakeClock.start();
-            if (pressed != m_brakePressed || !m_brakeValid) {
-                m_brakePressed = pressed;
-                m_brakeValid = true;
-                m_dirty |= kDirtyBrake;
-            }
+            updateInput(m_brake, pressed, true, kDirtyBrake);
         }
         break;
 
@@ -118,27 +102,38 @@ bool CanDataModel::wheelSpeedFresh() const
     return fresh(m_wheelSpeedClock, kWheelSpeedStaleMs);
 }
 
-void CanDataModel::expireStaleInputs()
+template <typename T>
+void CanDataModel::updateInput(Input<T> &in, T value, bool valid, quint16 dirtyBit)
+{
+    in.clock.start();
+    if (!valid)
+        value = T{};
+    if (valid != in.valid || value != in.value) {
+        in.valid = valid;
+        in.value = value;
+        m_dirty |= dirtyBit;
+    }
+}
+
+template <typename T>
+void CanDataModel::expireInput(Input<T> &in, quint16 dirtyBit)
 {
     // A frame that stopped arriving drops its input back to the neutral
     // default and flags it invalid, instead of holding the last reading.
-    if (m_throttleValid && !fresh(m_throttleClock, kInputStaleMs)) {
-        m_throttleValid = false;
-        m_throttle = 0.0;
-        m_dirty |= kDirtyThrottle;
+    if (in.valid && !fresh(in.clock, kInputStaleMs)) {
+        in.valid = false;
+        in.value = T{};
+        m_dirty |= dirtyBit;
     }
-    if (m_steeringValid && !fresh(m_steeringClock, kInputStaleMs)) {
-        m_steeringValid = false;
-        m_steeringAngle = 0.0;
-        m_dirty |= kDirtySteering;
-    }
+}
+
+void CanDataModel::expireStaleInputs()
+{
+    expireInput(m_throttle, kDirtyThrottle);
+    expireInput(m_steering, kDirtySteering);
     // Also stops a brake bit latched on by a dead ASC1 from pinning the speed
     // to the fastest wheel.
-    if (m_brakeValid && !fresh(m_brakeClock, kInputStaleMs)) {
-        m_brakeValid = false;
-        m_brakePressed = false;
-        m_dirty |= kDirtyBrake;
-    }
+    expireInput(m_brake, kDirtyBrake);
 }
 
 int CanDataModel::vehicleSpeedFromWheels() const
@@ -146,7 +141,7 @@ int CanDataModel::vehicleSpeedFromWheels() const
     // RWD: the undriven fronts don't overread under wheelspin. Under braking a
     // locking wheel underreads instead, so take the fastest of all four — the
     // one closest to true road speed.
-    const double kmh = m_brakePressed
+    const double kmh = m_brake.value
         ? *std::max_element(m_wheels.begin(), m_wheels.end())
         : (m_wheels[FL] + m_wheels[FR]) / 2.0;
     return static_cast<int>(std::lround(kmh));

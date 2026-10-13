@@ -299,7 +299,7 @@ void TestCanDataModel::throttleDecodesAndBatches()
 
     // An unchanged reading must not re-notify.
     model.onFrame(CanFrames::dme2(90.0, 25.0));
-    QTest::qWait(250);
+    QTest::qWait(150);
     QCOMPARE(spy.count(), 1);
 }
 
@@ -352,9 +352,7 @@ void TestCanDataModel::staleInputsExpireToNeutral()
 void TestCanDataModel::shortDme2FrameStillDecodesCoolant()
 {
     CanDataModel model;
-    QByteArray payload(2, 0x00);
-    payload[CanScaling::kOffsetCoolant] = static_cast<char>(CanScaling::encodeCoolant(80.0));
-    model.onFrame(QCanBusFrame(CanScaling::kFrameTemp, payload));
+    model.onFrame(QCanBusFrame(CanScaling::kFrameTemp, CanFrames::coolant(80.0).payload().left(2)));
 
     QVERIFY(std::abs(model.coolantTemp() - 80.0) < 1.0);
     QVERIFY(!model.throttleValid());

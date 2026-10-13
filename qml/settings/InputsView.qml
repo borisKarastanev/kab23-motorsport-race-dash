@@ -2,8 +2,6 @@ import QtQuick 2.15
 
 // Live driver inputs: accelerator pedal, brake, steering angle.
 Item {
-    id: root
-
     Row {
         id: bars
         anchors.left: parent.left
@@ -28,7 +26,7 @@ Item {
             label: "BRAKE"
             value: dataModel.brakePressed ? 100 : 0
             valid: dataModel.brakeValid
-            valueText: !valid ? "--" : dataModel.brakePressed ? "ON" : "OFF"
+            binary: true
             fillColor: "#cc3333"
         }
     }

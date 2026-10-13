@@ -32,7 +32,6 @@ Item {
         // Bit-15-set decodes negative; positive is assumed to be a right turn.
         // If the car shows the opposite, negate the angle here.
         rotation: root.angle
-        Behavior on rotation { NumberAnimation { duration: 100 } }
 
         readonly property real rim: width * 0.09
 

@@ -8,39 +8,46 @@ TestCase {
 
     Component {
         id: barComp
-        Settings.InputBar { height: 304 } // track = 304 - labels - margins
+        Settings.InputBar { height: 304 }
     }
 
-    // Fill height animates over 100 ms; wait for it to settle.
-    function settledFill(bar) {
-        wait(200)
-        return bar.fillHeight
+    function fillHeight(bar) {
+        return findChild(bar, "fill").height
     }
 
     function test_fillIsProportional() {
         const bar = createTemporaryObject(barComp, this, { value: 0 })
         verify(bar !== null)
-        compare(settledFill(bar), 0)
+        compare(fillHeight(bar), 0)
 
         bar.value = 100
-        const full = settledFill(bar)
+        const full = fillHeight(bar)
         verify(full > 0)
 
         bar.value = 25
-        fuzzyCompare(settledFill(bar), full * 0.25, 0.5)
+        fuzzyCompare(fillHeight(bar), full * 0.25, 0.5)
     }
 
     function test_valueClampedAbove100() {
         const bar = createTemporaryObject(barComp, this, { value: 100 })
-        const full = settledFill(bar)
+        const full = fillHeight(bar)
         bar.value = 150
-        fuzzyCompare(settledFill(bar), full, 0.5)
+        compare(fillHeight(bar), full)
         compare(bar.valueText, "100%")
     }
 
     function test_invalidShowsEmptyDash() {
         const bar = createTemporaryObject(barComp, this, { value: 80, valid: false })
-        compare(settledFill(bar), 0)
+        compare(fillHeight(bar), 0)
+        compare(bar.valueText, "--")
+    }
+
+    function test_binaryShowsOnOff() {
+        const bar = createTemporaryObject(barComp, this, { value: 0, binary: true })
+        compare(bar.valueText, "OFF")
+        bar.value = 100
+        compare(bar.valueText, "ON")
+        bar.valid = false
         compare(bar.valueText, "--")
     }
 }
