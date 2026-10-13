@@ -8,6 +8,7 @@
 #include <QBluetoothLocalDevice>
 #include <QLowEnergyController>
 #include <QLowEnergyService>
+#include <QTimer>
 
 class RaceBoxProvider : public IRaceBoxProvider {
     Q_OBJECT
@@ -31,6 +32,8 @@ private slots:
 
 private:
     void connectToDevice(const QBluetoothDeviceInfo &info);
+    void scheduleScan(int delayMs);
+    void startScan();
     void tryParsePacket();
 
     QString                         m_deviceNamePrefix;
@@ -38,6 +41,10 @@ private:
     QLowEnergyController           *m_ctrl     = nullptr;
     QLowEnergyService              *m_service  = nullptr;
     QByteArray                      m_buffer;
+    // The single pending scan restart. Every retry path (scan finished, scan
+    // error, disconnect) goes through scheduleScan(), so retries can never
+    // stack into parallel chains however many of those signals fire.
+    QTimer                          m_retryTimer;
 
     // Nordic UART over BLE
     static const QBluetoothUuid kUartServiceUuid;

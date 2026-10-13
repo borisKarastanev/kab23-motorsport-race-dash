@@ -17,8 +17,5 @@ private slots:
 private:
     QTimer  m_timer;
     quint64 m_tick = 0;
-
-    static QCanBusFrame rpmFrame(int rpm);
-    static QCanBusFrame tempFrame(double coolant);
-    static QCanBusFrame dme4Frame(double oilTemp);
+    int     m_prevRpm = 0;
 };

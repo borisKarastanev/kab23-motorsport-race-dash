@@ -1,5 +1,5 @@
 #include "src/can/mockcanprovider.h"
-#include "src/core/canscaling.h"
+#include "src/can/canframes.h"
 #include <algorithm>
 #include <cmath>
 
@@ -8,6 +8,8 @@ namespace {
 constexpr int SHIFT_RPM   = 6800;
 constexpr int IDLE_RPM    =  650;
 constexpr int CYCLE_TICKS = 1150; // 23.0 s at 50 Hz
+constexpr int STEER_TICKS =  400; //  8.0 s at 50 Hz
+constexpr double KMH_PER_RPM = 0.03; // rough single-gear correlation: 6800 rpm ≈ 204 km/h
 
 } // namespace
 
@@ -21,7 +23,7 @@ MockCanProvider::MockCanProvider(QObject *parent)
     connect(&m_timer, &QTimer::timeout, this, &MockCanProvider::onTick);
 }
 
-void MockCanProvider::start() { m_tick = 0; m_timer.start(); }
+void MockCanProvider::start() { m_tick = 0; m_prevRpm = 0; m_timer.start(); }
 void MockCanProvider::stop()  { m_timer.stop(); }
 
 void MockCanProvider::onTick()
@@ -35,28 +37,17 @@ void MockCanProvider::onTick()
     const double coolantProgress = std::min(static_cast<double>(m_tick) / COOLANT_RAMP_TICKS, 1.0);
     const double oilProgress     = std::min(static_cast<double>(m_tick) / OIL_RAMP_TICKS,     1.0);
 
-    emit frameReady(rpmFrame(rpm));
-    emit frameReady(tempFrame(20.0 + coolantProgress * 70.0));
-    emit frameReady(dme4Frame(20.0 + oilProgress * 90.0));
-}
+    emit frameReady(CanFrames::rpm(rpm));
+    emit frameReady(CanFrames::coolant(20.0 + coolantProgress * 70.0));
+    emit frameReady(CanFrames::dme4(20.0 + oilProgress * 90.0));
 
-QCanBusFrame MockCanProvider::rpmFrame(int rpm)
-{
-    QByteArray payload(8, 0x00);
-    CanScaling::encodeRpm(rpm, payload.data() + CanScaling::kOffsetRpm);
-    return QCanBusFrame(CanScaling::kFrameRpm, payload);
-}
+    // Wheel speeds track RPM; rears read ~2% high to mimic driven-wheel slip.
+    const double kmh = rpm * KMH_PER_RPM;
+    emit frameReady(CanFrames::wheelSpeeds(kmh, kmh, kmh * 1.02, kmh * 1.02));
 
-QCanBusFrame MockCanProvider::tempFrame(double coolant)
-{
-    QByteArray payload(8, 0x00);
-    payload[CanScaling::kOffsetCoolant] = static_cast<char>(CanScaling::encodeCoolant(coolant));
-    return QCanBusFrame(CanScaling::kFrameTemp, payload);
-}
+    const double steerPhase = (static_cast<double>(m_tick % STEER_TICKS) / STEER_TICKS) * 2.0 * M_PI;
+    emit frameReady(CanFrames::steering(90.0 * std::sin(steerPhase)));
 
-QCanBusFrame MockCanProvider::dme4Frame(double oilTemp)
-{
-    QByteArray payload(8, 0x00);
-    payload[CanScaling::kOffsetOilTemp] = static_cast<char>(CanScaling::encodeOilTemp(oilTemp));
-    return QCanBusFrame(CanScaling::kFrameDme4, payload);
+    emit frameReady(CanFrames::asc1(rpm < m_prevRpm ? CanScaling::kBrakeBit : 0)); // braking while revs fall
+    m_prevRpm = rpm;
 }
