@@ -38,7 +38,9 @@ void MockCanProvider::onTick()
     const double oilProgress     = std::min(static_cast<double>(m_tick) / OIL_RAMP_TICKS,     1.0);
 
     emit frameReady(CanFrames::rpm(rpm));
-    emit frameReady(CanFrames::coolant(20.0 + coolantProgress * 70.0));
+    // Throttle: on while revs climb (first half of the cycle), off while they fall.
+    const double throttle = std::max(0.0, 100.0 * std::sin(phase));
+    emit frameReady(CanFrames::dme2(20.0 + coolantProgress * 70.0, throttle));
     emit frameReady(CanFrames::dme4(20.0 + oilProgress * 90.0));
 
     // Wheel speeds track RPM; rears read ~2% high to mimic driven-wheel slip.

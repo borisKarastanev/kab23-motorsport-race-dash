@@ -32,8 +32,18 @@ class CanDataModel : public QObject {
     Q_PROPERTY(double wheelSpeedFR READ wheelSpeedFR NOTIFY wheelSpeedsChanged)
     Q_PROPERTY(double wheelSpeedRL READ wheelSpeedRL NOTIFY wheelSpeedsChanged)
     Q_PROPERTY(double wheelSpeedRR READ wheelSpeedRR NOTIFY wheelSpeedsChanged)
+    // Driver inputs. Each *Valid flag is true only while its frame is fresh
+    // (< kInputStaleMs) — false before the first frame and after the bus goes
+    // quiet, so a missing signal can't pass for "centred" / "off" / "closed".
+    // While invalid the value itself reads as its neutral default (0 / false).
     Q_PROPERTY(double steeringAngle READ steeringAngle NOTIFY steeringAngleChanged)
+    Q_PROPERTY(bool steeringValid READ steeringValid NOTIFY steeringAngleChanged)
     Q_PROPERTY(bool brakePressed READ brakePressed NOTIFY brakePressedChanged)
+    Q_PROPERTY(bool brakeValid READ brakeValid NOTIFY brakePressedChanged)
+    // Accelerator pedal 0..100 % (0x329 byte 5). Also invalid while the DME
+    // reports init (0x00) or a PVS error (0xFF).
+    Q_PROPERTY(double throttle READ throttle NOTIFY throttleChanged)
+    Q_PROPERTY(bool throttleValid READ throttleValid NOTIFY throttleChanged)
     Q_PROPERTY(int gear READ gear NOTIFY gearChanged)
 
 public:
@@ -49,13 +59,19 @@ public:
     double wheelSpeedFR()  const { return m_wheels[FR]; }
     double wheelSpeedRL()  const { return m_wheels[RL]; }
     double wheelSpeedRR()  const { return m_wheels[RR]; }
-    double steeringAngle() const { return m_steeringAngle; }
-    bool   brakePressed()  const { return m_brakePressed; }
+    double steeringAngle() const { return m_steering.value; }
+    bool   steeringValid() const { return m_steering.valid; }
+    bool   brakePressed()  const { return m_brake.value; }
+    bool   brakeValid()    const { return m_brake.valid; }
+    double throttle()      const { return m_throttle.value; }
+    bool   throttleValid() const { return m_throttle.valid; }
     int    gear()        const { return m_gear; }
 
     // A wheel-speed reading older than this no longer drives speed — the GPS
     // fallback takes over so a dead ABS can't freeze the gauge at its last value.
     static constexpr qint64 kWheelSpeedStaleMs = 500;
+    // Same idea for the driver inputs shown on the INPUTS screen.
+    static constexpr qint64 kInputStaleMs = 500;
 
 public slots:
     void onFrame(const QCanBusFrame &frame);
@@ -71,6 +87,7 @@ signals:
     void wheelSpeedsChanged();
     void steeringAngleChanged();
     void brakePressedChanged();
+    void throttleChanged();
     void gearChanged();
 
 private slots:
@@ -87,10 +104,24 @@ private:
     static constexpr quint16 kDirtySpeedSource = 0x080;
     static constexpr quint16 kDirtySteering    = 0x100;
     static constexpr quint16 kDirtyBrake       = 0x200;
+    static constexpr quint16 kDirtyThrottle    = 0x400;
 
     enum Wheel { FL, FR, RL, RR }; // matches the 0x1F0 field order
 
+    // A driver input: its value, whether that value is live, and when its
+    // frame last arrived. While invalid, value holds the neutral T{}.
+    template <typename T>
+    struct Input {
+        T value{};
+        bool valid = false;
+        QElapsedTimer clock; // restarted on every frame; invalid until the first
+    };
+
+    static bool fresh(const QElapsedTimer &clock, qint64 staleMs);
     bool wheelSpeedFresh() const;
+    template <typename T> void updateInput(Input<T> &in, T value, bool valid, quint16 dirtyBit);
+    template <typename T> void expireInput(Input<T> &in, quint16 dirtyBit);
+    void expireStaleInputs();
     int  vehicleSpeedFromWheels() const;
     void applySpeed(int kmh);
     void updateSpeedSource();
@@ -103,8 +134,9 @@ private:
     int    m_gpsSpeed    = 0;
     bool   m_speedFromWheels = false;
     std::array<double, 4> m_wheels{};
-    double m_steeringAngle = 0.0;
-    bool   m_brakePressed  = false;
+    Input<double> m_steering;
+    Input<bool>   m_brake;
+    Input<double> m_throttle;
     QElapsedTimer m_wheelSpeedClock; // restarted on every 0x1F0; invalid until the first
     int    m_gear        = 0;
 

@@ -15,10 +15,19 @@ inline QCanBusFrame rpm(int rpm)
     return QCanBusFrame(CanScaling::kFrameRpm, payload);
 }
 
+// Coolant only — the pedal byte is left at 0x00 (DME init, throttle invalid).
 inline QCanBusFrame coolant(double celsius)
 {
     QByteArray payload(8, 0x00);
     payload[CanScaling::kOffsetCoolant] = static_cast<char>(CanScaling::encodeCoolant(celsius));
+    return QCanBusFrame(CanScaling::kFrameTemp, payload);
+}
+
+// DME2: coolant plus accelerator pedal.
+inline QCanBusFrame dme2(double celsius, double throttlePct)
+{
+    QByteArray payload = coolant(celsius).payload();
+    payload[CanScaling::kOffsetThrottle] = static_cast<char>(CanScaling::encodeThrottle(throttlePct));
     return QCanBusFrame(CanScaling::kFrameTemp, payload);
 }
 

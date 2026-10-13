@@ -35,6 +35,12 @@ void CanDataModel::onFrame(const QCanBusFrame &frame)
             m_coolantTemp = CanScaling::decodeCoolant(static_cast<quint8>(p[CanScaling::kOffsetCoolant]));
             m_dirty |= kDirtyCoolant;
         }
+        if (p.size() >= CanScaling::kOffsetThrottle + 1) {
+            const auto raw = static_cast<quint8>(p[CanScaling::kOffsetThrottle]);
+            // Init/PVS error reads as a closed pedal, never the pre-fault value.
+            updateInput(m_throttle, CanScaling::decodeThrottle(raw),
+                        CanScaling::throttleRawValid(raw), kDirtyThrottle);
+        }
         break;
 
     case CanScaling::kFrameDme4:
@@ -69,21 +75,15 @@ void CanDataModel::onFrame(const QCanBusFrame &frame)
 
     case CanScaling::kFrameSteering:
         if (p.size() >= CanScaling::kOffsetSteering + 2) {
-            const double angle = CanScaling::decodeSteering(p.constData() + CanScaling::kOffsetSteering);
-            if (angle != m_steeringAngle) {
-                m_steeringAngle = angle;
-                m_dirty |= kDirtySteering;
-            }
+            updateInput(m_steering, CanScaling::decodeSteering(p.constData() + CanScaling::kOffsetSteering),
+                        true, kDirtySteering);
         }
         break;
 
     case CanScaling::kFrameAsc1:
         if (p.size() >= CanScaling::kOffsetBrake + 1) {
             const bool pressed = static_cast<quint8>(p[CanScaling::kOffsetBrake]) & CanScaling::kBrakeBit;
-            if (pressed != m_brakePressed) {
-                m_brakePressed = pressed;
-                m_dirty |= kDirtyBrake;
-            }
+            updateInput(m_brake, pressed, true, kDirtyBrake);
         }
         break;
 
@@ -92,9 +92,48 @@ void CanDataModel::onFrame(const QCanBusFrame &frame)
     }
 }
 
+bool CanDataModel::fresh(const QElapsedTimer &clock, qint64 staleMs)
+{
+    return clock.isValid() && clock.elapsed() < staleMs;
+}
+
 bool CanDataModel::wheelSpeedFresh() const
 {
-    return m_wheelSpeedClock.isValid() && m_wheelSpeedClock.elapsed() < kWheelSpeedStaleMs;
+    return fresh(m_wheelSpeedClock, kWheelSpeedStaleMs);
+}
+
+template <typename T>
+void CanDataModel::updateInput(Input<T> &in, T value, bool valid, quint16 dirtyBit)
+{
+    in.clock.start();
+    if (!valid)
+        value = T{};
+    if (valid != in.valid || value != in.value) {
+        in.valid = valid;
+        in.value = value;
+        m_dirty |= dirtyBit;
+    }
+}
+
+template <typename T>
+void CanDataModel::expireInput(Input<T> &in, quint16 dirtyBit)
+{
+    // A frame that stopped arriving drops its input back to the neutral
+    // default and flags it invalid, instead of holding the last reading.
+    if (in.valid && !fresh(in.clock, kInputStaleMs)) {
+        in.valid = false;
+        in.value = T{};
+        m_dirty |= dirtyBit;
+    }
+}
+
+void CanDataModel::expireStaleInputs()
+{
+    expireInput(m_throttle, kDirtyThrottle);
+    expireInput(m_steering, kDirtySteering);
+    // Also stops a brake bit latched on by a dead ASC1 from pinning the speed
+    // to the fastest wheel.
+    expireInput(m_brake, kDirtyBrake);
 }
 
 int CanDataModel::vehicleSpeedFromWheels() const
@@ -102,7 +141,7 @@ int CanDataModel::vehicleSpeedFromWheels() const
     // RWD: the undriven fronts don't overread under wheelspin. Under braking a
     // locking wheel underreads instead, so take the fastest of all four — the
     // one closest to true road speed.
-    const double kmh = m_brakePressed
+    const double kmh = m_brake.value
         ? *std::max_element(m_wheels.begin(), m_wheels.end())
         : (m_wheels[FL] + m_wheels[FR]) / 2.0;
     return static_cast<int>(std::lround(kmh));
@@ -141,6 +180,7 @@ void CanDataModel::setSpeed(int kmh)
 void CanDataModel::emitNotifications()
 {
     updateSpeedSource();
+    expireStaleInputs();
 
     if (!m_dirty)
         return;
@@ -156,4 +196,5 @@ void CanDataModel::emitNotifications()
     if (dirty & kDirtyWheelSpeeds) emit wheelSpeedsChanged();
     if (dirty & kDirtySteering)    emit steeringAngleChanged();
     if (dirty & kDirtyBrake)       emit brakePressedChanged();
+    if (dirty & kDirtyThrottle)    emit throttleChanged();
 }

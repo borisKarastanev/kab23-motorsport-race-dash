@@ -24,6 +24,7 @@ Item {
     Component { id: compSessionTrackList; SessionsList {} }
     Component { id: compSessionSummary;   SessionSummary {} }
     Component { id: compTracks;         TracksBrowser {} }
+    Component { id: compInputs;         InputsView {} }
     Component { id: compDevice;         DeviceInfoMenu {} }
     Component { id: compDeviceVersion;  AppVersionDetail {} }
     Component { id: compDeviceStats;    DeviceStats {} }
@@ -46,6 +47,7 @@ Item {
             case "session-track-list": return compSessionTrackList
             case "session-summary":    return compSessionSummary
             case "tracks":          return compTracks
+            case "inputs":          return compInputs
             case "device":          return compDevice
             case "device-version":  return compDeviceVersion
             case "device-stats":    return compDeviceStats

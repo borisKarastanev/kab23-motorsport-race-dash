@@ -28,6 +28,11 @@ private slots:
     void shortWheelSpeedPayloadIgnored();
     void steeringAngleDecodesSign();
     void brakeBitDecodes();
+    void throttleDecodesAndBatches();
+    void throttleErrorReadsClosedAndInvalid();
+    void inputsInvalidUntilFirstFrame();
+    void staleInputsExpireToNeutral();
+    void shortDme2FrameStillDecodesCoolant();
 };
 
 void TestCanDataModel::rpmDecodesAndEmitsImmediately()
@@ -278,6 +283,80 @@ void TestCanDataModel::brakeBitDecodes()
 
     model.onFrame(CanFrames::asc1(0x00));
     QVERIFY(!model.brakePressed());
+}
+
+void TestCanDataModel::throttleDecodesAndBatches()
+{
+    CanDataModel model;
+    QSignalSpy spy(&model, &CanDataModel::throttleChanged);
+    QVERIFY(!model.throttleValid());
+
+    model.onFrame(CanFrames::dme2(90.0, 25.0));
+    QCOMPARE(spy.count(), 0); // batched by the 10 Hz notify timer
+    QTRY_COMPARE_WITH_TIMEOUT(spy.count(), 1, 500);
+    QVERIFY(model.throttleValid());
+    QVERIFY(std::abs(model.throttle() - 25.0) < 0.5);
+
+    // An unchanged reading must not re-notify.
+    model.onFrame(CanFrames::dme2(90.0, 25.0));
+    QTest::qWait(150);
+    QCOMPARE(spy.count(), 1);
+}
+
+void TestCanDataModel::throttleErrorReadsClosedAndInvalid()
+{
+    CanDataModel model;
+    model.onFrame(CanFrames::dme2(90.0, 60.0));
+    QVERIFY(model.throttleValid());
+
+    // A PVS fault must not leave the pre-fault pedal position on display.
+    QByteArray payload = CanFrames::dme2(90.0, 0.0).payload();
+    payload[CanScaling::kOffsetThrottle] = static_cast<char>(CanScaling::kThrottleRawError);
+    model.onFrame(QCanBusFrame(CanScaling::kFrameTemp, payload));
+
+    QVERIFY(!model.throttleValid());
+    QCOMPARE(model.throttle(), 0.0);
+}
+
+void TestCanDataModel::inputsInvalidUntilFirstFrame()
+{
+    CanDataModel model;
+    QVERIFY(!model.throttleValid());
+    QVERIFY(!model.steeringValid());
+    QVERIFY(!model.brakeValid());
+
+    // An unchanged-from-default value still marks the input as live.
+    model.onFrame(CanFrames::steering(0.0));
+    model.onFrame(CanFrames::asc1(0x00));
+    QVERIFY(model.steeringValid());
+    QVERIFY(model.brakeValid());
+}
+
+void TestCanDataModel::staleInputsExpireToNeutral()
+{
+    CanDataModel model;
+    model.onFrame(CanFrames::dme2(90.0, 80.0));
+    model.onFrame(CanFrames::steering(45.0));
+    model.onFrame(CanFrames::asc1(CanScaling::kBrakeBit));
+    QVERIFY(model.throttleValid() && model.steeringValid() && model.brakeValid());
+
+    // Bus goes quiet — the notify tick past the threshold drops all three.
+    QTRY_VERIFY_WITH_TIMEOUT(!model.throttleValid(), CanDataModel::kInputStaleMs + 500);
+    QVERIFY(!model.steeringValid());
+    QVERIFY(!model.brakeValid());
+    QCOMPARE(model.throttle(), 0.0);
+    QCOMPARE(model.steeringAngle(), 0.0);
+    QVERIFY(!model.brakePressed());
+}
+
+void TestCanDataModel::shortDme2FrameStillDecodesCoolant()
+{
+    CanDataModel model;
+    model.onFrame(QCanBusFrame(CanScaling::kFrameTemp, CanFrames::coolant(80.0).payload().left(2)));
+
+    QVERIFY(std::abs(model.coolantTemp() - 80.0) < 1.0);
+    QVERIFY(!model.throttleValid());
+    QCOMPARE(model.throttle(), 0.0);
 }
 
 QTEST_GUILESS_MAIN(TestCanDataModel)

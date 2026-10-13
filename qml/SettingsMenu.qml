@@ -11,6 +11,7 @@ Item {
         ListElement { itemTitle: "INTEGRATIONS";       itemKey: "integrations" }
         ListElement { itemTitle: "SESSIONS";           itemKey: "sessions" }
         ListElement { itemTitle: "TRACKS";             itemKey: "tracks" }
+        ListElement { itemTitle: "INPUTS";             itemKey: "inputs" }
         ListElement { itemTitle: "DEVICE SETTINGS";    itemKey: "device" }
     }
 
