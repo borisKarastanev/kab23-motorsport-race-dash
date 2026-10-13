@@ -27,7 +27,8 @@ Item {
             height: bars.height
             label: "BRAKE"
             value: dataModel.brakePressed ? 100 : 0
-            valueText: dataModel.brakePressed ? "ON" : "OFF"
+            valid: dataModel.brakeValid
+            valueText: !valid ? "--" : dataModel.brakePressed ? "ON" : "OFF"
             fillColor: "#cc3333"
         }
     }
@@ -49,18 +50,14 @@ Item {
             anchors.left: parent.left
             anchors.right: parent.right
             angle: dataModel.steeringAngle
+            valid: dataModel.steeringValid
         }
 
-        Text {
+        InputLabel {
             id: caption
             anchors.bottom: parent.bottom
             anchors.horizontalCenter: parent.horizontalCenter
             text: "STEERING · LWS MUST BE CALIBRATED"
-            color: "#888888"
-            font.pixelSize: 11
-            font.bold: true
-            font.family: "monospace"
-            font.letterSpacing: 2
         }
     }
 }

@@ -5,8 +5,13 @@ Item {
     id: root
 
     property real angle: 0 // degrees, positive = right
+    // False when 0x1F5 is missing or stale — a dimmed wheel and "--" rather
+    // than a centred 0.0° that would pass for a calibrated LWS.
+    property bool valid: true
 
     readonly property string angleText: {
+        if (!valid)
+            return "--"
         const a = Math.abs(angle)
         if (a < 0.05)
             return "0.0°"
@@ -20,8 +25,9 @@ Item {
         id: wheel
         anchors.top: parent.top
         anchors.horizontalCenter: parent.horizontalCenter
-        width: Math.min(root.width, root.height - readout.height - 12)
+        width: Math.max(0, Math.min(root.width, root.height - readout.height - 12))
         height: width
+        opacity: root.valid ? 1.0 : 0.3
 
         // Bit-15-set decodes negative; positive is assumed to be a right turn.
         // If the car shows the opposite, negate the angle here.
@@ -76,14 +82,12 @@ Item {
         }
     }
 
-    Text {
+    InputReadout {
         id: readout
         anchors.bottom: parent.bottom
         anchors.horizontalCenter: parent.horizontalCenter
         text: root.angleText
-        color: "#cccccc"
+        valid: root.valid
         font.pixelSize: 20
-        font.bold: true
-        font.family: "monospace"
     }
 }

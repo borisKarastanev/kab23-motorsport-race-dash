@@ -32,11 +32,16 @@ class CanDataModel : public QObject {
     Q_PROPERTY(double wheelSpeedFR READ wheelSpeedFR NOTIFY wheelSpeedsChanged)
     Q_PROPERTY(double wheelSpeedRL READ wheelSpeedRL NOTIFY wheelSpeedsChanged)
     Q_PROPERTY(double wheelSpeedRR READ wheelSpeedRR NOTIFY wheelSpeedsChanged)
+    // Driver inputs. Each *Valid flag is true only while its frame is fresh
+    // (< kInputStaleMs) — false before the first frame and after the bus goes
+    // quiet, so a missing signal can't pass for "centred" / "off" / "closed".
+    // While invalid the value itself reads as its neutral default (0 / false).
     Q_PROPERTY(double steeringAngle READ steeringAngle NOTIFY steeringAngleChanged)
+    Q_PROPERTY(bool steeringValid READ steeringValid NOTIFY steeringAngleChanged)
     Q_PROPERTY(bool brakePressed READ brakePressed NOTIFY brakePressedChanged)
-    // Accelerator pedal 0..100 % (0x329 byte 5). throttleValid is false until
-    // the DME reports a usable value, and again while it flags a PVS error —
-    // throttle then holds its last good reading.
+    Q_PROPERTY(bool brakeValid READ brakeValid NOTIFY brakePressedChanged)
+    // Accelerator pedal 0..100 % (0x329 byte 5). Also invalid while the DME
+    // reports init (0x00) or a PVS error (0xFF).
     Q_PROPERTY(double throttle READ throttle NOTIFY throttleChanged)
     Q_PROPERTY(bool throttleValid READ throttleValid NOTIFY throttleChanged)
     Q_PROPERTY(int gear READ gear NOTIFY gearChanged)
@@ -55,7 +60,9 @@ public:
     double wheelSpeedRL()  const { return m_wheels[RL]; }
     double wheelSpeedRR()  const { return m_wheels[RR]; }
     double steeringAngle() const { return m_steeringAngle; }
+    bool   steeringValid() const { return m_steeringValid; }
     bool   brakePressed()  const { return m_brakePressed; }
+    bool   brakeValid()    const { return m_brakeValid; }
     double throttle()      const { return m_throttle; }
     bool   throttleValid() const { return m_throttleValid; }
     int    gear()        const { return m_gear; }
@@ -63,6 +70,8 @@ public:
     // A wheel-speed reading older than this no longer drives speed — the GPS
     // fallback takes over so a dead ABS can't freeze the gauge at its last value.
     static constexpr qint64 kWheelSpeedStaleMs = 500;
+    // Same idea for the driver inputs shown on the INPUTS screen.
+    static constexpr qint64 kInputStaleMs = 500;
 
 public slots:
     void onFrame(const QCanBusFrame &frame);
@@ -99,7 +108,9 @@ private:
 
     enum Wheel { FL, FR, RL, RR }; // matches the 0x1F0 field order
 
+    static bool fresh(const QElapsedTimer &clock, qint64 staleMs);
     bool wheelSpeedFresh() const;
+    void expireStaleInputs();
     int  vehicleSpeedFromWheels() const;
     void applySpeed(int kmh);
     void updateSpeedSource();
@@ -113,9 +124,15 @@ private:
     bool   m_speedFromWheels = false;
     std::array<double, 4> m_wheels{};
     double m_steeringAngle = 0.0;
+    bool   m_steeringValid = false;
     bool   m_brakePressed  = false;
+    bool   m_brakeValid    = false;
     double m_throttle      = 0.0;
     bool   m_throttleValid = false;
+    // Restarted on every frame of the matching ID; invalid until the first.
+    QElapsedTimer m_steeringClock;
+    QElapsedTimer m_brakeClock;
+    QElapsedTimer m_throttleClock;
     QElapsedTimer m_wheelSpeedClock; // restarted on every 0x1F0; invalid until the first
     int    m_gear        = 0;
 

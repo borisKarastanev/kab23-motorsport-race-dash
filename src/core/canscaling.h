@@ -30,9 +30,11 @@ constexpr double kCoolantOffset = 48.373;
 inline quint8  encodeCoolant(double c)     { return static_cast<quint8>((c + kCoolantOffset) / kCoolantScale); }
 inline double  decodeCoolant(quint8 b)     { return kCoolantScale * b - kCoolantOffset; }
 
-// 0x329 byte 5 accelerator pedal (TPS_CAN, % of PVS_MAX). Spec scale is
-// raw * 0.390625 with 0x01 = 0 % and 0xFE = 99.2 %; normalised here so the
-// usable range 0x01..0xFE maps to a full 0..100 %. 0x00 = init, 0xFF = error.
+// 0x329 byte 5 accelerator pedal (TPS_CAN, % of PVS_MAX). 0x00 = init,
+// 0xFF = PVS error. Deliberately NOT the spec's raw * 0.390625 (which reads
+// 0x01 as 0.39 % and full pedal 0xFE as 99.2 %): the usable range 0x01..0xFE
+// is remapped linearly to 0..100 % so a floored pedal shows exactly 100 %.
+// Readings therefore differ from INPA/MS43 logs by up to ~0.8 %.
 constexpr int    kOffsetThrottle   = 5;
 constexpr quint8 kThrottleRawMin   = 0x01;
 constexpr quint8 kThrottleRawMax   = 0xFE;

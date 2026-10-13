@@ -43,6 +43,8 @@
         <file>qml/settings/TimeZoneZoneList.qml</file>
         <file>qml/settings/DateTimeModal.qml</file>
         <file>qml/settings/InputBar.qml</file>
+        <file>qml/settings/InputLabel.qml</file>
+        <file>qml/settings/InputReadout.qml</file>
         <file>qml/settings/SteeringWheel.qml</file>
         <file>qml/settings/InputsView.qml</file>
         <file>qml/Gauge.qml</file>

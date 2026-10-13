@@ -15,15 +15,12 @@ Item {
 
     implicitWidth: 72
 
-    Text {
+    InputReadout {
         id: valueLabel
         anchors.top: parent.top
         anchors.horizontalCenter: parent.horizontalCenter
         text: root.valueText
-        color: root.valid ? "#cccccc" : "#555555"
-        font.pixelSize: 16
-        font.bold: true
-        font.family: "monospace"
+        valid: root.valid
     }
 
     Rectangle {
@@ -55,15 +52,10 @@ Item {
         }
     }
 
-    Text {
+    InputLabel {
         id: nameLabel
         anchors.bottom: parent.bottom
         anchors.horizontalCenter: parent.horizontalCenter
         text: root.label
-        color: "#888888"
-        font.pixelSize: 11
-        font.bold: true
-        font.family: "monospace"
-        font.letterSpacing: 2
     }
 }

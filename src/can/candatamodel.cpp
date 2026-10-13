@@ -38,16 +38,13 @@ void CanDataModel::onFrame(const QCanBusFrame &frame)
         if (p.size() >= CanScaling::kOffsetThrottle + 1) {
             const auto raw = static_cast<quint8>(p[CanScaling::kOffsetThrottle]);
             const bool valid = CanScaling::throttleRawValid(raw);
-            if (valid != m_throttleValid) {
+            // Init/PVS error reads as a closed pedal, never the pre-fault value.
+            const double pct = valid ? CanScaling::decodeThrottle(raw) : 0.0;
+            m_throttleClock.start();
+            if (valid != m_throttleValid || pct != m_throttle) {
                 m_throttleValid = valid;
+                m_throttle = pct;
                 m_dirty |= kDirtyThrottle;
-            }
-            if (valid) {
-                const double pct = CanScaling::decodeThrottle(raw);
-                if (pct != m_throttle) {
-                    m_throttle = pct;
-                    m_dirty |= kDirtyThrottle;
-                }
             }
         }
         break;
@@ -85,8 +82,10 @@ void CanDataModel::onFrame(const QCanBusFrame &frame)
     case CanScaling::kFrameSteering:
         if (p.size() >= CanScaling::kOffsetSteering + 2) {
             const double angle = CanScaling::decodeSteering(p.constData() + CanScaling::kOffsetSteering);
-            if (angle != m_steeringAngle) {
+            m_steeringClock.start();
+            if (angle != m_steeringAngle || !m_steeringValid) {
                 m_steeringAngle = angle;
+                m_steeringValid = true;
                 m_dirty |= kDirtySteering;
             }
         }
@@ -95,8 +94,10 @@ void CanDataModel::onFrame(const QCanBusFrame &frame)
     case CanScaling::kFrameAsc1:
         if (p.size() >= CanScaling::kOffsetBrake + 1) {
             const bool pressed = static_cast<quint8>(p[CanScaling::kOffsetBrake]) & CanScaling::kBrakeBit;
-            if (pressed != m_brakePressed) {
+            m_brakeClock.start();
+            if (pressed != m_brakePressed || !m_brakeValid) {
                 m_brakePressed = pressed;
+                m_brakeValid = true;
                 m_dirty |= kDirtyBrake;
             }
         }
@@ -107,9 +108,37 @@ void CanDataModel::onFrame(const QCanBusFrame &frame)
     }
 }
 
+bool CanDataModel::fresh(const QElapsedTimer &clock, qint64 staleMs)
+{
+    return clock.isValid() && clock.elapsed() < staleMs;
+}
+
 bool CanDataModel::wheelSpeedFresh() const
 {
-    return m_wheelSpeedClock.isValid() && m_wheelSpeedClock.elapsed() < kWheelSpeedStaleMs;
+    return fresh(m_wheelSpeedClock, kWheelSpeedStaleMs);
+}
+
+void CanDataModel::expireStaleInputs()
+{
+    // A frame that stopped arriving drops its input back to the neutral
+    // default and flags it invalid, instead of holding the last reading.
+    if (m_throttleValid && !fresh(m_throttleClock, kInputStaleMs)) {
+        m_throttleValid = false;
+        m_throttle = 0.0;
+        m_dirty |= kDirtyThrottle;
+    }
+    if (m_steeringValid && !fresh(m_steeringClock, kInputStaleMs)) {
+        m_steeringValid = false;
+        m_steeringAngle = 0.0;
+        m_dirty |= kDirtySteering;
+    }
+    // Also stops a brake bit latched on by a dead ASC1 from pinning the speed
+    // to the fastest wheel.
+    if (m_brakeValid && !fresh(m_brakeClock, kInputStaleMs)) {
+        m_brakeValid = false;
+        m_brakePressed = false;
+        m_dirty |= kDirtyBrake;
+    }
 }
 
 int CanDataModel::vehicleSpeedFromWheels() const
@@ -156,6 +185,7 @@ void CanDataModel::setSpeed(int kmh)
 void CanDataModel::emitNotifications()
 {
     updateSpeedSource();
+    expireStaleInputs();
 
     if (!m_dirty)
         return;
