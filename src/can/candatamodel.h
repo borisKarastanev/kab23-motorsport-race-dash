@@ -34,6 +34,11 @@ class CanDataModel : public QObject {
     Q_PROPERTY(double wheelSpeedRR READ wheelSpeedRR NOTIFY wheelSpeedsChanged)
     Q_PROPERTY(double steeringAngle READ steeringAngle NOTIFY steeringAngleChanged)
     Q_PROPERTY(bool brakePressed READ brakePressed NOTIFY brakePressedChanged)
+    // Accelerator pedal 0..100 % (0x329 byte 5). throttleValid is false until
+    // the DME reports a usable value, and again while it flags a PVS error —
+    // throttle then holds its last good reading.
+    Q_PROPERTY(double throttle READ throttle NOTIFY throttleChanged)
+    Q_PROPERTY(bool throttleValid READ throttleValid NOTIFY throttleChanged)
     Q_PROPERTY(int gear READ gear NOTIFY gearChanged)
 
 public:
@@ -51,6 +56,8 @@ public:
     double wheelSpeedRR()  const { return m_wheels[RR]; }
     double steeringAngle() const { return m_steeringAngle; }
     bool   brakePressed()  const { return m_brakePressed; }
+    double throttle()      const { return m_throttle; }
+    bool   throttleValid() const { return m_throttleValid; }
     int    gear()        const { return m_gear; }
 
     // A wheel-speed reading older than this no longer drives speed — the GPS
@@ -71,6 +78,7 @@ signals:
     void wheelSpeedsChanged();
     void steeringAngleChanged();
     void brakePressedChanged();
+    void throttleChanged();
     void gearChanged();
 
 private slots:
@@ -87,6 +95,7 @@ private:
     static constexpr quint16 kDirtySpeedSource = 0x080;
     static constexpr quint16 kDirtySteering    = 0x100;
     static constexpr quint16 kDirtyBrake       = 0x200;
+    static constexpr quint16 kDirtyThrottle    = 0x400;
 
     enum Wheel { FL, FR, RL, RR }; // matches the 0x1F0 field order
 
@@ -105,6 +114,8 @@ private:
     std::array<double, 4> m_wheels{};
     double m_steeringAngle = 0.0;
     bool   m_brakePressed  = false;
+    double m_throttle      = 0.0;
+    bool   m_throttleValid = false;
     QElapsedTimer m_wheelSpeedClock; // restarted on every 0x1F0; invalid until the first
     int    m_gear        = 0;
 

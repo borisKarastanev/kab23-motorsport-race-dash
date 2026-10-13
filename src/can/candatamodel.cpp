@@ -35,6 +35,21 @@ void CanDataModel::onFrame(const QCanBusFrame &frame)
             m_coolantTemp = CanScaling::decodeCoolant(static_cast<quint8>(p[CanScaling::kOffsetCoolant]));
             m_dirty |= kDirtyCoolant;
         }
+        if (p.size() >= CanScaling::kOffsetThrottle + 1) {
+            const auto raw = static_cast<quint8>(p[CanScaling::kOffsetThrottle]);
+            const bool valid = CanScaling::throttleRawValid(raw);
+            if (valid != m_throttleValid) {
+                m_throttleValid = valid;
+                m_dirty |= kDirtyThrottle;
+            }
+            if (valid) {
+                const double pct = CanScaling::decodeThrottle(raw);
+                if (pct != m_throttle) {
+                    m_throttle = pct;
+                    m_dirty |= kDirtyThrottle;
+                }
+            }
+        }
         break;
 
     case CanScaling::kFrameDme4:
@@ -156,4 +171,5 @@ void CanDataModel::emitNotifications()
     if (dirty & kDirtyWheelSpeeds) emit wheelSpeedsChanged();
     if (dirty & kDirtySteering)    emit steeringAngleChanged();
     if (dirty & kDirtyBrake)       emit brakePressedChanged();
+    if (dirty & kDirtyThrottle)    emit throttleChanged();
 }

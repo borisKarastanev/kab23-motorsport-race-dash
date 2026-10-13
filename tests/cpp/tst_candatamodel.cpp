@@ -28,6 +28,9 @@ private slots:
     void shortWheelSpeedPayloadIgnored();
     void steeringAngleDecodesSign();
     void brakeBitDecodes();
+    void throttleDecodesAndBatches();
+    void throttleInvalidKeepsLastValue();
+    void shortDme2FrameStillDecodesCoolant();
 };
 
 void TestCanDataModel::rpmDecodesAndEmitsImmediately()
@@ -278,6 +281,51 @@ void TestCanDataModel::brakeBitDecodes()
 
     model.onFrame(CanFrames::asc1(0x00));
     QVERIFY(!model.brakePressed());
+}
+
+void TestCanDataModel::throttleDecodesAndBatches()
+{
+    CanDataModel model;
+    QSignalSpy spy(&model, &CanDataModel::throttleChanged);
+    QVERIFY(!model.throttleValid());
+
+    model.onFrame(CanFrames::dme2(90.0, 25.0));
+    QCOMPARE(spy.count(), 0); // batched by the 10 Hz notify timer
+    QTRY_COMPARE_WITH_TIMEOUT(spy.count(), 1, 500);
+    QVERIFY(model.throttleValid());
+    QVERIFY(std::abs(model.throttle() - 25.0) < 0.5);
+
+    // An unchanged reading must not re-notify.
+    model.onFrame(CanFrames::dme2(90.0, 25.0));
+    QTest::qWait(250);
+    QCOMPARE(spy.count(), 1);
+}
+
+void TestCanDataModel::throttleInvalidKeepsLastValue()
+{
+    CanDataModel model;
+    model.onFrame(CanFrames::dme2(90.0, 60.0));
+    QVERIFY(model.throttleValid());
+    const double last = model.throttle();
+
+    QByteArray payload = CanFrames::dme2(90.0, 0.0).payload();
+    payload[CanScaling::kOffsetThrottle] = static_cast<char>(CanScaling::kThrottleRawError);
+    model.onFrame(QCanBusFrame(CanScaling::kFrameTemp, payload));
+
+    QVERIFY(!model.throttleValid());
+    QCOMPARE(model.throttle(), last);
+}
+
+void TestCanDataModel::shortDme2FrameStillDecodesCoolant()
+{
+    CanDataModel model;
+    QByteArray payload(2, 0x00);
+    payload[CanScaling::kOffsetCoolant] = static_cast<char>(CanScaling::encodeCoolant(80.0));
+    model.onFrame(QCanBusFrame(CanScaling::kFrameTemp, payload));
+
+    QVERIFY(std::abs(model.coolantTemp() - 80.0) < 1.0);
+    QVERIFY(!model.throttleValid());
+    QCOMPARE(model.throttle(), 0.0);
 }
 
 QTEST_GUILESS_MAIN(TestCanDataModel)

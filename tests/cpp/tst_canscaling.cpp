@@ -20,6 +20,9 @@ private slots:
     void wheelSpeedEncodeClampsInsteadOfWrapping();
     void steeringRoundTrip_data();
     void steeringRoundTrip();
+    void throttleRoundTrip_data();
+    void throttleRoundTrip();
+    void throttleRangeAndValidity();
 };
 
 void TestCanScaling::rpmRoundTrip_data()
@@ -135,6 +138,34 @@ void TestCanScaling::steeringRoundTrip()
     char buf[2] = {0, 0};
     CanScaling::encodeSteering(deg, buf);
     QVERIFY(std::abs(CanScaling::decodeSteering(buf) - deg) <= CanScaling::kDegPerSteeringLsb / 2 + 1e-9);
+}
+
+void TestCanScaling::throttleRoundTrip_data()
+{
+    QTest::addColumn<double>("pct");
+    QTest::newRow("closed")  << 0.0;
+    QTest::newRow("quarter") << 25.0;
+    QTest::newRow("half")    << 50.0;
+    QTest::newRow("full")    << 100.0;
+}
+
+void TestCanScaling::throttleRoundTrip()
+{
+    QFETCH(double, pct);
+    const quint8 raw = CanScaling::encodeThrottle(pct);
+    QVERIFY(CanScaling::throttleRawValid(raw));
+    const double lsb = 100.0 / (CanScaling::kThrottleRawMax - CanScaling::kThrottleRawMin);
+    QVERIFY(std::abs(CanScaling::decodeThrottle(raw) - pct) <= lsb / 2 + 1e-9);
+}
+
+void TestCanScaling::throttleRangeAndValidity()
+{
+    QCOMPARE(CanScaling::decodeThrottle(CanScaling::kThrottleRawMin), 0.0);
+    QCOMPARE(CanScaling::decodeThrottle(CanScaling::kThrottleRawMax), 100.0);
+    QVERIFY(!CanScaling::throttleRawValid(CanScaling::kThrottleRawInit));
+    QVERIFY(!CanScaling::throttleRawValid(CanScaling::kThrottleRawError));
+    QCOMPARE(CanScaling::encodeThrottle(150.0), CanScaling::kThrottleRawMax);
+    QCOMPARE(CanScaling::encodeThrottle(-5.0), CanScaling::kThrottleRawMin);
 }
 
 QTEST_APPLESS_MAIN(TestCanScaling)
