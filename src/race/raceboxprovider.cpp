@@ -24,7 +24,10 @@ static constexpr int     UBX_TOTAL    = UBX_OVERHEAD + UBX_PAYLOAD;
 RaceBoxProvider::RaceBoxProvider(const QString &deviceNamePrefix, QObject *parent)
     : IRaceBoxProvider(parent)
     , m_deviceNamePrefix(deviceNamePrefix)
-{}
+{
+    m_retryTimer.setSingleShot(true);
+    connect(&m_retryTimer, &QTimer::timeout, this, &RaceBoxProvider::startScan);
+}
 
 void RaceBoxProvider::start()
 {
@@ -42,11 +45,28 @@ void RaceBoxProvider::start()
     connect(m_scanner, &QBluetoothDeviceDiscoveryAgent::errorOccurred,
             this, &RaceBoxProvider::onScanError);
     qCInfo(lcRaceBox) << "Scanning for" << m_deviceNamePrefix;
+    startScan();
+}
+
+void RaceBoxProvider::scheduleScan(int delayMs)
+{
+    // One timer; if a retry is already pending keep the longer delay, so an
+    // error's back-off isn't cut short by a concurrent finished(). Whether a
+    // scan is still wanted is decided when it fires, in startScan().
+    // remainingTime() is -1 when idle.
+    m_retryTimer.start(qMax(delayMs, m_retryTimer.remainingTime()));
+}
+
+void RaceBoxProvider::startScan()
+{
+    if (m_ctrl || !m_scanner || m_scanner->isActive())
+        return;
     m_scanner->start(QBluetoothDeviceDiscoveryAgent::LowEnergyMethod);
 }
 
 void RaceBoxProvider::stop()
 {
+    m_retryTimer.stop();
     if (m_scanner) m_scanner->stop();
     if (m_ctrl)    m_ctrl->disconnectFromDevice();
 }
@@ -62,20 +82,14 @@ void RaceBoxProvider::onDeviceDiscovered(const QBluetoothDeviceInfo &info)
 
 void RaceBoxProvider::onScanFinished()
 {
-    if (!m_ctrl)
-        QTimer::singleShot(2000, this, [this]() {
-            if (!m_ctrl) m_scanner->start(QBluetoothDeviceDiscoveryAgent::LowEnergyMethod);
-        });
+    scheduleScan(2000);
 }
 
 void RaceBoxProvider::onScanError(QBluetoothDeviceDiscoveryAgent::Error err)
 {
     // Adapter may not be ready at boot (race with bluetoothd startup) — retry after delay
     qCWarning(lcRaceBox) << "Scan error" << err << "— retrying in 5 s";
-    if (!m_ctrl)
-        QTimer::singleShot(5000, this, [this]() {
-            if (!m_ctrl) m_scanner->start(QBluetoothDeviceDiscoveryAgent::LowEnergyMethod);
-        });
+    scheduleScan(5000);
 }
 
 void RaceBoxProvider::connectToDevice(const QBluetoothDeviceInfo &info)
@@ -108,10 +122,7 @@ void RaceBoxProvider::onDisconnected()
 
     // Immediate reconnect reuses stale BlueZ D-Bus GATT objects and causes
     // InvalidService. 5 s gives BlueZ time to fully tear down the connection.
-    QTimer::singleShot(5000, this, [this]() {
-        if (!m_ctrl && m_scanner)
-            m_scanner->start(QBluetoothDeviceDiscoveryAgent::LowEnergyMethod);
-    });
+    scheduleScan(5000);
 }
 
 void RaceBoxProvider::onAllServicesDiscovered()

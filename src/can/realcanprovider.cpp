@@ -53,8 +53,7 @@ void RealCanProvider::scheduleRetry(const QString &reason)
 
     qCWarning(lcCan) << reason << "— retrying in" << kRetryDelayMs << "ms";
     // can0 may not exist yet at boot (USB2CAN adapter enumeration, slcand not
-    // up yet) — retry instead of giving up permanently, mirroring the BLE
-    // adapter-not-ready retry in RaceBoxProvider::onScanError(). Using `this`
+    // up yet) — retry instead of giving up permanently. Using `this`
     // as the context object means Qt automatically drops this callback if the
     // provider is destroyed before the timer fires — no dangling access.
     QTimer::singleShot(kRetryDelayMs, this, [this]() {
