@@ -15,6 +15,11 @@ private slots:
     void oilTempRoundTrip();
     void decodeBoundaryBytes();
     void frameAndOffsetConstants();
+    void wheelSpeedRoundTrip();
+    void wheelSpeedMasksUpperNibble();
+    void wheelSpeedEncodeClampsInsteadOfWrapping();
+    void steeringRoundTrip_data();
+    void steeringRoundTrip();
 };
 
 void TestCanScaling::rpmRoundTrip_data()
@@ -89,6 +94,47 @@ void TestCanScaling::frameAndOffsetConstants()
     QCOMPARE(CanScaling::kOffsetRpm,     2);
     QCOMPARE(CanScaling::kOffsetCoolant, 1);
     QCOMPARE(CanScaling::kOffsetOilTemp, 4);
+}
+
+void TestCanScaling::wheelSpeedRoundTrip()
+{
+    char buf[2] = {0, 0};
+    CanScaling::encodeWheelSpeed(123.4375, buf); // exact multiple of 0.0625
+    QCOMPARE(CanScaling::decodeWheelSpeed(buf), 123.4375);
+}
+
+void TestCanScaling::wheelSpeedMasksUpperNibble()
+{
+    // 0xF640: upper nibble 0xF is counter/flags, low 12 bits 0x640 = 1600 → 100 km/h.
+    const char buf[2] = {static_cast<char>(0x40), static_cast<char>(0xF6)};
+    QCOMPARE(CanScaling::decodeWheelSpeed(buf), 100.0);
+}
+
+void TestCanScaling::wheelSpeedEncodeClampsInsteadOfWrapping()
+{
+    char buf[2] = {0, 0};
+    CanScaling::encodeWheelSpeed(260.0, buf); // above the 12-bit ceiling (~255.94)
+    QCOMPARE(CanScaling::decodeWheelSpeed(buf), CanScaling::kWheelSpeedMask * CanScaling::kKmhPerWheelLsb);
+
+    CanScaling::encodeWheelSpeed(-5.0, buf);
+    QCOMPARE(CanScaling::decodeWheelSpeed(buf), 0.0);
+}
+
+void TestCanScaling::steeringRoundTrip_data()
+{
+    QTest::addColumn<double>("deg");
+    QTest::newRow("centre") << 0.0;
+    QTest::newRow("left")   << 90.0;
+    QTest::newRow("right")  << -90.0;
+    QTest::newRow("lock")   << -540.0;
+}
+
+void TestCanScaling::steeringRoundTrip()
+{
+    QFETCH(double, deg);
+    char buf[2] = {0, 0};
+    CanScaling::encodeSteering(deg, buf);
+    QVERIFY(std::abs(CanScaling::decodeSteering(buf) - deg) <= CanScaling::kDegPerSteeringLsb / 2 + 1e-9);
 }
 
 QTEST_APPLESS_MAIN(TestCanScaling)

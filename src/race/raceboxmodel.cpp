@@ -345,8 +345,8 @@ void RaceBoxModel::onConnectionStateChanged(bool connected)
         m_hasFix = false;
         m_havePrevFix = false;       // stale previous fix must not bridge a reconnect
         m_haveHeadingAnchor = false; // nor anchor a bearing across the gap
-        m_speedKmh = 0;              // don't leave a moving-speed reading latched across a dropout
         m_dirty |= kDirtyFix;
+        setSpeedKmh(0);              // don't leave a moving-speed reading latched across a dropout
     }
 }
 
@@ -396,7 +396,7 @@ void RaceBoxModel::onData(const RaceBoxData &d)
 
     int kmhInt = static_cast<int>(d.speedMmS / kMmSPerKmh);
     if (kmhInt < kStationarySpeedKmh) kmhInt = 0; // floor GPS jitter to a steady 0 while parked
-    if (kmhInt != m_speedKmh) { m_speedKmh = kmhInt; emit speedKmhChanged(kmhInt); }
+    setSpeedKmh(kmhInt);
 
     if (fix) {
         const double curLat = d.latitude, curLon = d.longitude;
@@ -617,6 +617,14 @@ void RaceBoxModel::resetLapCounters()
 {
     resetLapState();
     qCInfo(lcRaceBox) << "Lap counters reset — session saved";
+}
+
+void RaceBoxModel::setSpeedKmh(int kmh)
+{
+    // The only writer of m_speedKmh, so a change can never skip the signal.
+    if (kmh == m_speedKmh) return;
+    m_speedKmh = kmh;
+    emit speedKmhChanged(kmh);
 }
 
 void RaceBoxModel::emitNotifications()

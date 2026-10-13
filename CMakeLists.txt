@@ -50,6 +50,7 @@ add_executable(bmw-e46-dash
     src/core/apppaths.h
     src/core/logging.cpp
     src/can/icanprovider.h
+    src/can/canframes.h
     src/can/candatamodel.cpp
     src/device/dashconfig.cpp
     src/can/mockcanprovider.cpp

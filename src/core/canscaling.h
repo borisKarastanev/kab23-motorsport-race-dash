@@ -2,6 +2,7 @@
 
 #include <QtEndian>
 #include <QtGlobal>
+#include <cmath>
 
 // Encode/decode pairs for each PT-CAN frame. Both MockCanProvider and
 // CanDataModel use these so a single edit covers both sides of the wire.
@@ -33,5 +34,53 @@ inline double  decodeCoolant(quint8 b)     { return kCoolantScale * b - kCoolant
 constexpr double kOilTempOffset = 48.0;
 inline quint8  encodeOilTemp(double c)     { return static_cast<quint8>(c + kOilTempOffset); }
 inline double  decodeOilTemp(quint8 b)     { return static_cast<double>(b) - kOilTempOffset; }
+
+// ── MK60 ABS (retrofit) ─────────────────────────────────────────────────────
+// Layouts below are the assumed E46 DSC encoding — verify against candump.
+
+// 0x1F0 wheel speeds: four LE u16 at bytes 0/2/4/6 (FL, FR, RL, RR). Low 12 bits
+// are the speed; the upper nibble carries counter/flag bits and is masked off.
+constexpr quint32 kFrameWheelSpeed   = 0x1F0;
+constexpr int     kOffsetWheelFL     = 0;
+constexpr int     kOffsetWheelFR     = 2;
+constexpr int     kOffsetWheelRL     = 4;
+constexpr int     kOffsetWheelRR     = 6;
+constexpr quint16 kWheelSpeedMask    = 0x0FFF;
+constexpr double  kKmhPerWheelLsb    = 0.0625;
+inline void   encodeWheelSpeed(double kmh, char *dst)
+{
+    // Clamp, don't mask: masking wraps anything above ~256 km/h to a tiny value.
+    const int raw = qBound(0, qRound(kmh / kKmhPerWheelLsb), int(kWheelSpeedMask));
+    qToLittleEndian<quint16>(static_cast<quint16>(raw), dst);
+}
+inline double decodeWheelSpeed(const char *src)
+{
+    return (qFromLittleEndian<quint16>(src) & kWheelSpeedMask) * kKmhPerWheelLsb;
+}
+
+// 0x1F5 steering angle (LWS): bytes 0-1 LE u16, bits 0-14 magnitude, bit 15 = sign
+// (set = negative). Only meaningful once the LWS has been calibrated.
+constexpr quint32 kFrameSteering      = 0x1F5;
+constexpr int     kOffsetSteering     = 0;
+constexpr quint16 kSteeringSignBit    = 0x8000;
+constexpr double  kDegPerSteeringLsb  = 0.045;
+inline void   encodeSteering(double deg, char *dst)
+{
+    auto raw = static_cast<quint16>(qRound(std::abs(deg) / kDegPerSteeringLsb)) & ~kSteeringSignBit;
+    if (deg < 0)
+        raw |= kSteeringSignBit;
+    qToLittleEndian<quint16>(static_cast<quint16>(raw), dst);
+}
+inline double decodeSteering(const char *src)
+{
+    const quint16 raw = qFromLittleEndian<quint16>(src);
+    const double mag  = (raw & ~kSteeringSignBit) * kDegPerSteeringLsb;
+    return (raw & kSteeringSignBit) ? -mag : mag;
+}
+
+// 0x153 ASC1: byte 0 bit 4 = brake light switch
+constexpr quint32 kFrameAsc1   = 0x153;
+constexpr int     kOffsetBrake = 0;
+constexpr quint8  kBrakeBit    = 0x10;
 
 } // namespace CanScaling

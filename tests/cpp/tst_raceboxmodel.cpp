@@ -114,6 +114,7 @@ private slots:
     void batteryAndGForceDecodeIndependentOfFix();
     void lowSpeedNoiseFlooredToZero();
     void speedAboveNoiseFloorReportedExactly();
+    void disconnectPublishesZeroSpeed();
     void cannotLearnFinishLineWithoutFix();
     void learnFinishLineNoOpWithoutHeading();
     void learnFinishLineSucceedsOnceMoving();
@@ -263,6 +264,22 @@ void TestRaceBoxModel::speedAboveNoiseFloorReportedExactly()
     model.onData(makeFix(0.0, 0.0, /*hasFix=*/false, /*speedMmS=*/16667)); // ~60 km/h
     QCOMPARE(model.speedKmh(), 60);
     QCOMPARE(speedSpy.count(), 1);
+}
+
+void TestRaceBoxModel::disconnectPublishesZeroSpeed()
+{
+    RaceBoxModel model;
+    model.onConnectionStateChanged(true);
+    model.onData(makeFix(0.0, 0.0, /*hasFix=*/false, /*speedMmS=*/16667)); // ~60 km/h
+    QSignalSpy speedSpy(&model, &RaceBoxModel::speedKmhChanged);
+
+    // CanDataModel keeps the last GPS speed as its fallback — a dropout must
+    // push 0 through the signal, not just zero the member.
+    model.onConnectionStateChanged(false);
+
+    QCOMPARE(model.speedKmh(), 0);
+    QCOMPARE(speedSpy.count(), 1);
+    QCOMPARE(speedSpy.takeFirst().at(0).toInt(), 0);
 }
 
 void TestRaceBoxModel::cannotLearnFinishLineWithoutFix()

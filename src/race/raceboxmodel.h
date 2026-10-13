@@ -203,6 +203,8 @@ private slots:
     void emitNotifications();
 
 private:
+    void setSpeedKmh(int kmh);
+
     // A GPS sample recorded during a lap: position plus elapsed time since the
     // lap's start crossing. Declared up here (rather than beside
     // m_currentLapTrace below) because deriveSectorGates() takes one as a
