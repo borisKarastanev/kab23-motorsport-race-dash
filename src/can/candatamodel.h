@@ -27,6 +27,14 @@ class CanDataModel : public QObject {
     // frames are fresh — front average normally, fastest wheel while braking —
     // otherwise from the RaceBox GPS via setSpeed().
     Q_PROPERTY(int speed READ speed NOTIFY speedChanged)
+    // Low oil pressure emergency: the DME4 (0x545) oil-pressure-low bit while
+    // the engine is running (fresh 0x316, rpm > kOilPressureMinRpm). A stopped
+    // or cranking engine legitimately has no pressure, so the bit alone isn't
+    // an alarm. Debounced both ways by kOilPressureDebounceMs, so the switch
+    // lagging just after start-up, or chattering at a hot idle, can't flash
+    // the full-screen warning. The bit goes stale like the driver inputs, so a
+    // dead bus clears it rather than latching the warning on.
+    Q_PROPERTY(bool oilPressureWarning READ oilPressureWarning NOTIFY oilPressureWarningChanged)
     Q_PROPERTY(bool speedFromWheels READ speedFromWheels NOTIFY speedFromWheelsChanged)
     Q_PROPERTY(double wheelSpeedFL READ wheelSpeedFL NOTIFY wheelSpeedsChanged)
     Q_PROPERTY(double wheelSpeedFR READ wheelSpeedFR NOTIFY wheelSpeedsChanged)
@@ -53,6 +61,7 @@ public:
     double coolantTemp() const { return m_coolantTemp; }
     double oilTemp()     const { return m_oilTemp; }
     bool   oilTempSeen() const { return m_oilTempSeen; }
+    bool   oilPressureWarning() const { return m_oilPressureWarning; }
     int    speed()       const { return m_speed; }
     bool   speedFromWheels() const { return m_speedFromWheels; }
     double wheelSpeedFL()  const { return m_wheels[FL]; }
@@ -74,6 +83,11 @@ public:
     static constexpr double kWheelSpeedDeadbandKmh = 1.5;
     // Same idea for the driver inputs shown on the INPUTS screen.
     static constexpr qint64 kInputStaleMs = 500;
+    // Below this the engine is stopped or cranking — no oil pressure is expected.
+    static constexpr int kOilPressureMinRpm = 500;
+    // How long "low pressure while running" must hold before the warning shows
+    // (and how long it must be gone before the warning clears).
+    static constexpr qint64 kOilPressureDebounceMs = 1000;
 
 public slots:
     void onFrame(const QCanBusFrame &frame);
@@ -84,6 +98,7 @@ signals:
     void coolantTempChanged();
     void oilTempChanged();
     void oilTempSeenChanged();
+    void oilPressureWarningChanged();
     void speedChanged();
     void speedFromWheelsChanged();
     void wheelSpeedsChanged();
@@ -107,6 +122,7 @@ private:
     static constexpr quint16 kDirtySteering    = 0x100;
     static constexpr quint16 kDirtyBrake       = 0x200;
     static constexpr quint16 kDirtyThrottle    = 0x400;
+    static constexpr quint16 kDirtyOilPressure = 0x800;
 
     enum Wheel { FL, FR, RL, RR }; // matches the 0x1F0 field order
 
@@ -127,8 +143,12 @@ private:
     int  vehicleSpeedFromWheels() const;
     void applySpeed(int kmh);
     void updateSpeedSource();
+    bool engineRunning() const;
+    void updateOilPressureWarning();
 
     int    m_rpm         = 0;
+    QElapsedTimer m_rpmClock;    // restarted on every 0x316; invalid until the first
+    bool   m_rpmDropRejected = false; // last 0x316 was rejected as a transient drop
     double m_coolantTemp = 0.0;
     double m_oilTemp     = 0.0;
     bool   m_oilTempSeen = false;
@@ -139,6 +159,10 @@ private:
     Input<double> m_steering;
     Input<bool>   m_brake;
     Input<double> m_throttle;
+    Input<bool>   m_oilPressureLow; // raw 0x545 bit, fresh-gated like the inputs
+    bool   m_oilPressureWarning = false;
+    QElapsedTimer m_oilPressureDebounce; // running while the raw state disagrees with the warning
+    bool   m_dme4ShortWarned = false;
     QElapsedTimer m_wheelSpeedClock; // restarted on every 0x1F0; invalid until the first
     int    m_gear        = 0;
 

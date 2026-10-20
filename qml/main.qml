@@ -14,6 +14,10 @@ Window {
         id: rootSwipe
         anchors.fill: parent
         interactive: false
+        // Hidden, not torn down, under the oil pressure warning: whatever page
+        // or modal was open (a half-typed password, an install in progress)
+        // is still there when the warning clears.
+        visible: !oilPressureWarning.visible
 
         DashboardView {
             id: dashboardView
@@ -32,5 +36,14 @@ Window {
             if (currentIndex === 0)
                 settingsView.resetToRoot()
         }
+    }
+
+    // Low oil pressure emergency — above every page, so no page or overlay
+    // can ever cover it, and nothing underneath needs to know about it.
+    OilPressureWarning {
+        id: oilPressureWarning
+        anchors.fill: parent
+        z: 1000
+        visible: dataModel.oilPressureWarning
     }
 }

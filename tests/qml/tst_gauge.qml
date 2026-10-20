@@ -10,6 +10,8 @@ TestCase {
         App.Gauge {}
     }
 
+    App.AlertPulse { id: palette }
+
     function test_normalBelowWarning() {
         const gauge = createTemporaryObject(gaugeComp, null,
             { warningThreshold: 100, dangerThreshold: 120, value: 50 })
@@ -104,7 +106,7 @@ TestCase {
         compare(gauge.color.a,        0.3)
         compare(gauge.border.color.a, 0.3)
         // Colour channels are untouched — only alpha moves.
-        fuzzyCompare(gauge.color.r, gauge.fillDanger.r, 0.001)
+        fuzzyCompare(gauge.color.r, palette.fillDanger.r, 0.001)
         // The reading itself never fades.
         compare(gauge.opacity, 1.0)
 

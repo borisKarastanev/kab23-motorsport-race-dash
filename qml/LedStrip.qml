@@ -32,15 +32,14 @@ Item {
     readonly property bool isAllBlue:        rpm >= scaledAllBlueRpm
     readonly property bool isCenterFlashing: rpm >= pairThresholds[4]
 
-    property real flashAlpha: 1.0
+    property alias flashAlpha: flash.alpha
 
-    onIsCenterFlashingChanged: if (!isCenterFlashing) flashAlpha = 1.0
-
-    SequentialAnimation on flashAlpha {
-        running: root.isCenterFlashing
-        loops:   Animation.Infinite
-        NumberAnimation { to: 0.1; duration: root.flashIntervalMs }
-        NumberAnimation { to: 1.0; duration: root.flashIntervalMs }
+    AlertPulse {
+        id: flash
+        active:     root.isCenterFlashing
+        duration:   root.flashIntervalMs
+        minAlpha:   0.1
+        easingType: Easing.Linear
     }
 
     Row {

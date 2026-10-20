@@ -17,7 +17,10 @@ add_test(NAME tst_canscaling COMMAND tst_canscaling)
 set_tests_properties(tst_canscaling PROPERTIES ENVIRONMENT "${DASH_TEST_ENV}")
 
 # ── candatamodel: CAN frame decode + RPM state machine ────────────────
-add_executable(tst_candatamodel cpp/tst_candatamodel.cpp ${APP_SRC_DIR}/src/can/candatamodel.cpp)
+add_executable(tst_candatamodel cpp/tst_candatamodel.cpp
+    ${APP_SRC_DIR}/src/can/candatamodel.cpp
+    ${APP_SRC_DIR}/src/core/logging.cpp
+)
 target_include_directories(tst_candatamodel PRIVATE ${APP_SRC_DIR})
 target_link_libraries(tst_candatamodel PRIVATE Qt6::Test Qt6::SerialBus)
 add_test(NAME tst_candatamodel COMMAND tst_candatamodel)

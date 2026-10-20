@@ -31,10 +31,12 @@ inline QCanBusFrame dme2(double celsius, double throttlePct)
     return QCanBusFrame(CanScaling::kFrameTemp, payload);
 }
 
-inline QCanBusFrame dme4(double oilTemp)
+inline QCanBusFrame dme4(double oilTemp, bool oilPressureLow = false)
 {
     QByteArray payload(8, 0x00);
     payload[CanScaling::kOffsetOilTemp] = static_cast<char>(CanScaling::encodeOilTemp(oilTemp));
+    if (oilPressureLow)
+        payload[CanScaling::kOffsetDme4Status] = static_cast<char>(CanScaling::kOilPressureLowBit);
     return QCanBusFrame(CanScaling::kFrameDme4, payload);
 }
 

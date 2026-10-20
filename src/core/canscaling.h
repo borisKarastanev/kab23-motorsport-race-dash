@@ -10,13 +10,14 @@ namespace CanScaling {
 
 constexpr quint32 kFrameRpm  = 0x316;
 constexpr quint32 kFrameTemp = 0x329;
-// DME4 status frame — byte 4 = oil temperature (TOIL_CAN)
+// DME4 status frame — byte 4 = oil temperature (TOIL_CAN), byte 7 bit 7 = oil pressure low
 constexpr quint32 kFrameDme4 = 0x545;
 
 // Byte offsets within each frame — single source of truth for encoder and decoder
 constexpr int kOffsetRpm     = 2; // 0x316 bytes 2-3, LE u16 (byte 2 = LSB, byte 3 = MSB)
 constexpr int kOffsetCoolant = 1; // 0x329 byte 1
 constexpr int kOffsetOilTemp = 4; // 0x545 byte 4
+constexpr int kOffsetDme4Status = 7; // 0x545 byte 7 (status bitfield)
 
 // 0x316 RPM: DME spec N_ENG = raw * 0.15625  →  kRawPerRpm = 6.4 (exact)
 // Empirical candump read ~6.42; the <0.3% difference is below display resolution.
@@ -56,6 +57,12 @@ inline quint8 encodeThrottle(double pct)
 constexpr double kOilTempOffset = 48.0;
 inline quint8  encodeOilTemp(double c)     { return static_cast<quint8>(c + kOilTempOffset); }
 inline double  decodeOilTemp(quint8 b)     { return static_cast<double>(b) - kOilTempOffset; }
+
+// 0x545 byte 7 bit 7: engine oil pressure low (pressure switch, read by the DME).
+// Also set with the engine stopped — there's no pressure to read.
+// Assumed from the DME4 spec, not yet seen on the car — verify against candump
+// (key on, engine off: byte 7 should have 0x80 set; it should clear once running).
+constexpr quint8 kOilPressureLowBit = 0x80;
 
 // ── MK60 ABS (retrofit) ─────────────────────────────────────────────────────
 // Layouts below are the assumed E46 DSC encoding — verify against candump.

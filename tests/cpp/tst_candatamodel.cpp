@@ -2,6 +2,9 @@
 #include <QSignalSpy>
 #include <QCanBusFrame>
 #include <QThread>
+#include <QElapsedTimer>
+#include <QRegularExpression>
+#include <functional>
 
 #include "src/can/candatamodel.h"
 #include "src/can/canframes.h"
@@ -14,6 +17,7 @@ private slots:
     void rpmDecodesAndEmitsImmediately();
     void rpmSameValueDoesNotReemit();
     void rpmLargeDropRejectedAsTransient();
+    void rpmConsecutiveLargeDropAccepted();
     void rpmClampedTo7000();
     void shortPayloadIgnored();
     void coolantAndOilDecodeAndBatch();
@@ -33,6 +37,12 @@ private slots:
     void inputsInvalidUntilFirstFrame();
     void staleInputsExpireToNeutral();
     void shortDme2FrameStillDecodesCoolant();
+    void oilPressureWarningRequiresRunningEngine();
+    void oilPressureWarningDebouncedOnStartup();
+    void oilPressureWarningClearsWhenBitClears();
+    void oilPressureWarningExpiresWhenDme4Stale();
+    void oilPressureWarningClearsWhenRpmStale();
+    void shortDme4FrameStillDecodesOilTemp();
 };
 
 void TestCanDataModel::rpmDecodesAndEmitsImmediately()
@@ -69,6 +79,19 @@ void TestCanDataModel::rpmLargeDropRejectedAsTransient()
 
     QCOMPARE(spy.count(), 0);
     QVERIFY(std::abs(model.rpm() - 3000) <= 1);
+}
+
+void TestCanDataModel::rpmConsecutiveLargeDropAccepted()
+{
+    CanDataModel model;
+    model.onFrame(CanFrames::rpm(3000));
+    model.onFrame(CanFrames::rpm(500)); // rejected as a one-frame transient
+    QVERIFY(std::abs(model.rpm() - 3000) <= 1);
+
+    // A second low reading in a row is a real drop — accepted, so one bogus
+    // high value can't pin rpm up forever.
+    model.onFrame(CanFrames::rpm(500));
+    QVERIFY(std::abs(model.rpm() - 500) <= 1);
 }
 
 void TestCanDataModel::rpmClampedTo7000()
@@ -357,6 +380,103 @@ void TestCanDataModel::shortDme2FrameStillDecodesCoolant()
     QVERIFY(std::abs(model.coolantTemp() - 80.0) < 1.0);
     QVERIFY(!model.throttleValid());
     QCOMPARE(model.throttle(), 0.0);
+}
+
+// Streams `frames` every 100 ms like a live bus (well inside the 500 ms stale
+// window) until `done()` holds or `ms` runs out; returns done(). The warning
+// needs fresh rpm for the whole debounce window, so frames can't be sent once.
+static bool feedUntil(CanDataModel &model, const QList<QCanBusFrame> &frames, int ms,
+                      const std::function<bool()> &done)
+{
+    QElapsedTimer t;
+    t.start();
+    while (!done() && t.elapsed() < ms) {
+        for (const QCanBusFrame &f : frames)
+            model.onFrame(f);
+        QTest::qWait(100);
+    }
+    return done();
+}
+
+static constexpr int kSettleMs = CanDataModel::kOilPressureDebounceMs + 300;
+
+void TestCanDataModel::oilPressureWarningRequiresRunningEngine()
+{
+    CanDataModel model;
+    QSignalSpy spy(&model, &CanDataModel::oilPressureWarningChanged);
+    const auto warning = [&] { return model.oilPressureWarning(); };
+
+    // Ignition on, engine stopped: the switch reads low, but that's expected.
+    QVERIFY(!feedUntil(model, {CanFrames::rpm(0), CanFrames::dme4(90.0, true)}, kSettleMs, warning));
+    QCOMPARE(spy.count(), 0);
+
+    QVERIFY(feedUntil(model, {CanFrames::rpm(800), CanFrames::dme4(90.0, true)}, kSettleMs, warning));
+    QCOMPARE(spy.count(), 1);
+}
+
+void TestCanDataModel::oilPressureWarningDebouncedOnStartup()
+{
+    CanDataModel model;
+    QSignalSpy spy(&model, &CanDataModel::oilPressureWarningChanged);
+    const auto warning = [&] { return model.oilPressureWarning(); };
+
+    // Engine just caught: pressure builds within the debounce window.
+    QVERIFY(!feedUntil(model, {CanFrames::rpm(900), CanFrames::dme4(90.0, true)},
+                       CanDataModel::kOilPressureDebounceMs / 2, warning));
+    QVERIFY(!feedUntil(model, {CanFrames::rpm(900), CanFrames::dme4(90.0, false)}, kSettleMs, warning));
+    QCOMPARE(spy.count(), 0);
+}
+
+void TestCanDataModel::oilPressureWarningClearsWhenBitClears()
+{
+    CanDataModel model;
+    const auto warning = [&] { return model.oilPressureWarning(); };
+    const auto cleared = [&] { return !model.oilPressureWarning(); };
+    QVERIFY(feedUntil(model, {CanFrames::rpm(2000), CanFrames::dme4(90.0, true)}, kSettleMs, warning));
+
+    // Held through a brief all-clear (switch chatter)...
+    const QList<QCanBusFrame> ok{CanFrames::rpm(2000), CanFrames::dme4(90.0, false)};
+    QVERIFY(!feedUntil(model, ok, CanDataModel::kOilPressureDebounceMs / 2, cleared));
+
+    // ...and cleared once pressure is back for the full window.
+    QVERIFY(feedUntil(model, ok, kSettleMs, cleared));
+}
+
+void TestCanDataModel::oilPressureWarningExpiresWhenDme4Stale()
+{
+    CanDataModel model;
+    QVERIFY(feedUntil(model, {CanFrames::rpm(2000), CanFrames::dme4(90.0, true)}, kSettleMs,
+                      [&] { return model.oilPressureWarning(); }));
+
+    // 0x545 goes quiet — a dead bus must not latch the alarm on.
+    QVERIFY(feedUntil(model, {CanFrames::rpm(2000)}, CanDataModel::kInputStaleMs + kSettleMs,
+                      [&] { return !model.oilPressureWarning(); }));
+}
+
+void TestCanDataModel::oilPressureWarningClearsWhenRpmStale()
+{
+    CanDataModel model;
+    QVERIFY(feedUntil(model, {CanFrames::rpm(2000), CanFrames::dme4(90.0, true)}, kSettleMs,
+                      [&] { return model.oilPressureWarning(); }));
+
+    // 0x316 goes quiet — a stale rpm can't vouch for a running engine.
+    QVERIFY(feedUntil(model, {CanFrames::dme4(90.0, true)}, CanDataModel::kInputStaleMs + kSettleMs,
+                      [&] { return !model.oilPressureWarning(); }));
+}
+
+void TestCanDataModel::shortDme4FrameStillDecodesOilTemp()
+{
+    CanDataModel model;
+    const QCanBusFrame shortFrame(CanScaling::kFrameDme4,
+                                  CanFrames::dme4(70.0, true).payload().left(5));
+
+    // Logged once, not per frame.
+    QTest::ignoreMessage(QtWarningMsg, QRegularExpression("oil pressure warning unavailable"));
+    model.onFrame(shortFrame);
+    QVERIFY(std::abs(model.oilTemp() - 70.0) < 1e-9);
+
+    QVERIFY(!feedUntil(model, {CanFrames::rpm(2000), shortFrame}, kSettleMs,
+                       [&] { return model.oilPressureWarning(); }));
 }
 
 QTEST_GUILESS_MAIN(TestCanDataModel)

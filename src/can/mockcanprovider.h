@@ -18,4 +18,5 @@ private:
     QTimer  m_timer;
     quint64 m_tick = 0;
     int     m_prevRpm = 0;
+    bool    m_oilPressureLow = false; // MOCK_OIL_PRESSURE_LOW — preview the emergency warning
 };
