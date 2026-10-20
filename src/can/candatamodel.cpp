@@ -1,5 +1,6 @@
 #include "src/can/candatamodel.h"
 #include "src/core/canscaling.h"
+#include "src/core/logging.h"
 #include <algorithm>
 #include <cmath>
 
@@ -21,9 +22,17 @@ void CanDataModel::onFrame(const QCanBusFrame &frame)
         if (p.size() >= CanScaling::kOffsetRpm + 2) {
             int rpm = CanScaling::decodeRpm(p.constData() + CanScaling::kOffsetRpm);
             rpm = qMin(rpm, 7000);
+            m_rpmClock.start();
             // At 50 Hz frame rate, a >2000 RPM single-frame drop is a CAN transient,
-            // not a real deceleration event — reject it.
-            if ((m_rpm > 600 && rpm < m_rpm - 2000) || rpm == m_rpm)
+            // not a real deceleration event — reject it. Only one frame in a
+            // row, though: a second consecutive low reading is real, and must
+            // not be rejected forever behind a bogus high value.
+            if (m_rpm > 600 && rpm < m_rpm - 2000 && !m_rpmDropRejected) {
+                m_rpmDropRejected = true;
+                break;
+            }
+            m_rpmDropRejected = false;
+            if (rpm == m_rpm)
                 break;
             m_rpm = rpm;
             emit rpmChanged(); // bypass the 10 Hz timer — RPM needs immediate QML updates
@@ -51,6 +60,16 @@ void CanDataModel::onFrame(const QCanBusFrame &frame)
                 m_oilTempSeen = true;
                 m_dirty |= kDirtyOilSeen;
             }
+        }
+        if (p.size() >= CanScaling::kOffsetDme4Status + 1) {
+            const bool low = static_cast<quint8>(p[CanScaling::kOffsetDme4Status]) & CanScaling::kOilPressureLowBit;
+            updateInput(m_oilPressureLow, low, true, 0);
+        } else if (!m_dme4ShortWarned) {
+            // Oil temp still decodes, but the oil pressure warning can't work
+            // without byte 7 — make that visible in the device log.
+            m_dme4ShortWarned = true;
+            qCWarning(lcCan) << "0x545 frame has" << p.size()
+                             << "bytes — oil pressure warning unavailable";
         }
         break;
 
@@ -134,6 +153,29 @@ void CanDataModel::expireStaleInputs()
     // Also stops a brake bit latched on by a dead ASC1 from pinning the speed
     // to the fastest wheel.
     expireInput(m_brake, kDirtyBrake);
+    expireInput(m_oilPressureLow, 0);
+}
+
+bool CanDataModel::engineRunning() const
+{
+    // A stale rpm (0x316 gone quiet) can't vouch for a running engine.
+    return fresh(m_rpmClock, kInputStaleMs) && m_rpm > kOilPressureMinRpm;
+}
+
+void CanDataModel::updateOilPressureWarning()
+{
+    const bool low = m_oilPressureLow.value && engineRunning();
+    if (low == m_oilPressureWarning) {
+        m_oilPressureDebounce.invalidate();
+        return;
+    }
+    if (!m_oilPressureDebounce.isValid())
+        m_oilPressureDebounce.start();
+    if (m_oilPressureDebounce.elapsed() >= kOilPressureDebounceMs) {
+        m_oilPressureWarning = low;
+        m_oilPressureDebounce.invalidate();
+        m_dirty |= kDirtyOilPressure;
+    }
 }
 
 int CanDataModel::vehicleSpeedFromWheels() const
@@ -185,6 +227,7 @@ void CanDataModel::emitNotifications()
 {
     updateSpeedSource();
     expireStaleInputs();
+    updateOilPressureWarning();
 
     if (!m_dirty)
         return;
@@ -194,6 +237,7 @@ void CanDataModel::emitNotifications()
     if (dirty & kDirtyCoolant) emit coolantTempChanged();
     if (dirty & kDirtyOilTemp) emit oilTempChanged();
     if (dirty & kDirtyOilSeen) emit oilTempSeenChanged();
+    if (dirty & kDirtyOilPressure) emit oilPressureWarningChanged();
     if (dirty & kDirtySpeed)   emit speedChanged();
     if (dirty & kDirtyGear)    emit gearChanged();
     if (dirty & kDirtySpeedSource) emit speedFromWheelsChanged();

@@ -97,6 +97,8 @@ void TestCanScaling::frameAndOffsetConstants()
     QCOMPARE(CanScaling::kOffsetRpm,     2);
     QCOMPARE(CanScaling::kOffsetCoolant, 1);
     QCOMPARE(CanScaling::kOffsetOilTemp, 4);
+    QCOMPARE(CanScaling::kOffsetDme4Status, 7);
+    QCOMPARE(CanScaling::kOilPressureLowBit, quint8(0x80));
 }
 
 void TestCanScaling::wheelSpeedRoundTrip()
