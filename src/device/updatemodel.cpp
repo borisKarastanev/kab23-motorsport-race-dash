@@ -1,7 +1,9 @@
 #include "src/device/updatemodel.h"
+#include "src/core/apppaths.h"
 #include "src/core/logging.h"
 
 #include <QCoreApplication>
+#include <QDateTime>
 #include <QDir>
 #include <QFile>
 #include <QNetworkAccessManager>
@@ -11,6 +13,7 @@
 #include <QRegularExpression>
 #include <QVersionNumber>
 #include <QSet>
+#include <QStringDecoder>
 #include <QTimer>
 #include <memory>
 
@@ -291,6 +294,93 @@ int UpdateModel::countStageMarkers(const QString &scriptText)
     return count;
 }
 
+bool UpdateModel::isInstallSummaryLine(const QString &line)
+{
+    // install.sh's own annotations: indented "(...)" lines — per-step timings,
+    // build jobs, ccache stats, migrations — plus the closing total.
+    static const QRegularExpression summary(R"(^ {4}\(.+\)$|^Total install\.sh time: \d+s$)");
+    return summary.match(line).hasMatch();
+}
+
+void UpdateModel::openInstallLog()
+{
+    m_installLog.setFileName(AppPaths::dataFile("update.log"));
+    m_installLineBuf.clear();
+    if (!m_installLog.open(QIODevice::WriteOnly | QIODevice::Truncate | QIODevice::Text)) {
+        qCWarning(lcApp) << "Could not open" << m_installLog.fileName() << "— install output not persisted";
+        return;
+    }
+    m_installLog.write(QStringLiteral("# %1  update %2 -> %3\n")
+                           .arg(QDateTime::currentDateTime().toString(Qt::ISODate),
+                                currentVersion(), m_targetTag).toUtf8());
+    m_installLog.flush();
+}
+
+QStringList UpdateModel::takeCompleteLines(QString &buffer, const QString &chunk)
+{
+    buffer += chunk;
+    const int lastNl = buffer.lastIndexOf('\n');
+    if (lastNl < 0)
+        return {};
+    QStringList lines = buffer.left(lastNl).split('\n');
+    buffer.remove(0, lastNl + 1);
+    for (QString &line : lines) {
+        if (line.endsWith('\r'))
+            line.chop(1);
+    }
+    return lines;
+}
+
+void UpdateModel::appendInstallLog(const QString &text)
+{
+    // Written as it arrives (not on exit) so a hung or killed install still
+    // leaves its log behind.
+    if (m_installLog.isOpen()) {
+        m_installLog.write(text.toUtf8());
+        m_installLog.flush();
+    }
+}
+
+void UpdateModel::logInstallOutput(const QString &chunk)
+{
+    appendInstallLog(chunk);
+    // Chunks can split lines (a stage marker included) — only whole lines
+    // are parsed; the unterminated tail waits for the next chunk.
+    for (const QString &line : takeCompleteLines(m_installLineBuf, chunk))
+        handleInstallLine(line);
+}
+
+void UpdateModel::flushInstallOutput()
+{
+    if (!m_installLineBuf.isEmpty())
+        handleInstallLine(m_installLineBuf);
+    m_installLineBuf.clear();
+}
+
+void UpdateModel::handleInstallLine(const QString &line)
+{
+    // Surface install.sh's summary lines in the Device Log, so step timings
+    // are readable on the dash itself.
+    if (isInstallSummaryLine(line))
+        qCInfo(lcApp).noquote() << "install.sh:" << line.trimmed();
+
+    // Progress is reported by parsing the "=== stage ===" markers it prints.
+    static const QRegularExpression marker(R"(^=== (.+) ===$)");
+    const QRegularExpressionMatch m = marker.match(line);
+    if (m.hasMatch()) {
+        m_installStagesSeen++;
+        m_installStage = m.captured(1);
+        m_installProgress = qMin(1.0, double(m_installStagesSeen) / m_installTotalStages);
+        emit installProgressChanged();
+    }
+}
+
+void UpdateModel::closeInstallLog(const QString &trailer)
+{
+    appendInstallLog(QStringLiteral("\n# %1\n").arg(trailer));
+    m_installLog.close();
+}
+
 int UpdateModel::countInstallStages() const
 {
     // Counts install.sh's own step "..." calls rather than hardcoding a
@@ -311,37 +401,35 @@ int UpdateModel::countInstallStages() const
 void UpdateModel::runInstallScript()
 {
     m_installTotalStages = countInstallStages();
+    openInstallLog();
 
     // No timeout: install.sh runs apt + a full build and can take minutes.
-    // Progress is reported by parsing the "=== stage ===" markers it prints.
     startProcessStep("sudo", { "-S", "-p", "", "bash", repoRoot() + "/install.sh" }, 0,
         [this](bool ok, const QString &output) {
+            flushInstallOutput();
             m_procOutputTail = lastLines(output, 15);
             if (ok) {
+                closeInstallLog("install.sh succeeded");
                 zeroPassword();
                 setState(InstallSucceeded);
             } else {
+                // The log stays open so the rollback's outcome lands in it too.
+                appendInstallLog("\n# install.sh failed\n");
                 runRollbackCheckout("install.sh failed: " + m_procOutputTail);
             }
         },
         /*feedPassword=*/true,
-        [this](const QString &chunk) {
-            static const QRegularExpression marker(R"(^=== (.+) ===$)", QRegularExpression::MultilineOption);
-            QRegularExpressionMatchIterator it = marker.globalMatch(chunk);
-            while (it.hasNext()) {
-                m_installStagesSeen++;
-                m_installStage = it.next().captured(1);
-                m_installProgress = qMin(1.0, double(m_installStagesSeen) / m_installTotalStages);
-                emit installProgressChanged();
-            }
-        });
+        [this](const QString &chunk) { logInstallOutput(chunk); });
 }
 
 void UpdateModel::runRollbackCheckout(const QString &reason)
 {
     zeroPassword();
     startProcessStep("git", { "checkout", "-f", m_rollbackRef }, 15000,
-        [this, reason](bool ok, const QString &) {
+        [this, reason](bool ok, const QString &output) {
+            closeInstallLog(ok ? QStringLiteral("rolled back to %1").arg(m_rollbackRef)
+                               : QStringLiteral("rollback to %1 FAILED: %2")
+                                     .arg(m_rollbackRef, lastLines(output, 5)));
             const QString suffix = ok
                 ? " — rolled back to the previous version."
                 : " — rollback ALSO FAILED; manual recovery needed.";
@@ -357,16 +445,34 @@ void UpdateModel::requestReboot()
     setState(Rebooting);
 
     if (m_mockMode) {
+        if (qEnvironmentVariable("DASH_MOCK_UPDATE") == "reboot-fail") {
+            QTimer::singleShot(300, this, [this]() { onRebootFailed("mock: reboot refused"); });
+            return;
+        }
         qCInfo(lcApp) << "[mock] reboot requested — no-op";
         return;
     }
 
-    startProcessStep("sudo", { "-S", "-p", "", "reboot" }, 10000,
-        [](bool, const QString &) {
-            // The system is rebooting (or the command failed); there is no
-            // meaningful follow-up action once the reboot has been issued.
-        }, /*feedPassword=*/true);
-    zeroPassword();
+    // No sudo: install.sh's polkit rule lets the dashboard user reboot. The
+    // password is long gone by now (wiped when install.sh finished), and sudo's
+    // cached credential expires after ~15 min — a long build used to outlive
+    // it, leaving this stuck on REBOOTING… with sudo silently refusing.
+    startProcessStep("systemctl", { "reboot" }, 10000,
+        [this](bool ok, const QString &output) {
+            if (!ok)
+                onRebootFailed(output);
+            // else: the system is going down
+        });
+}
+
+void UpdateModel::onRebootFailed(const QString &output)
+{
+    // Back to the success screen, which shows errorText and keeps
+    // RESTART NOW for a retry — never stuck on REBOOTING….
+    qCWarning(lcApp).noquote() << "reboot failed:" << output.trimmed();
+    setState(InstallSucceeded,
+             "Restart failed: " + lastLines(output, 3)
+             + " — switch the ignition off and on to finish the update.");
 }
 
 void UpdateModel::reset()
@@ -405,33 +511,60 @@ void UpdateModel::startProcessStep(const QString &program, const QStringList &ar
     proc->setProcessChannelMode(QProcess::MergedChannels);
 
     auto outputBuf = std::make_shared<QString>();
-    connect(proc, &QProcess::readyReadStandardOutput, this, [proc, outputBuf, onOutput]() {
-        const QString chunk = QString::fromUtf8(proc->readAllStandardOutput());
+    // Stateful decoder: a multi-byte UTF-8 character split across two reads
+    // (install.sh prints em-dashes) must not turn into U+FFFD.
+    auto decoder = std::make_shared<QStringDecoder>(QStringDecoder::Utf8);
+    auto timedOut = std::make_shared<bool>(false);
+
+    connect(proc, &QProcess::readyReadStandardOutput, this, [proc, outputBuf, decoder, onOutput]() {
+        const QString chunk = decoder->decode(proc->readAllStandardOutput());
         *outputBuf += chunk;
         if (onOutput)
             onOutput(chunk);
     });
 
-    connect(proc, QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished), this,
-            [this, proc, outputBuf, onDone](int exitCode, QProcess::ExitStatus status) {
-        const bool ok = (status == QProcess::NormalExit && exitCode == 0);
+    auto finish = [this, proc, outputBuf, onDone](bool ok, const QString &failureNote) {
+        // A failure always carries a reason, even when the process printed
+        // nothing (killed by the timeout, failed to exec).
+        if (!ok)
+            *outputBuf += (outputBuf->isEmpty() || outputBuf->endsWith('\n') ? "" : "\n") + failureNote;
         onDone(ok, *outputBuf);
         if (m_proc == proc) {
             m_proc = nullptr;
             proc->deleteLater();
         }
+    };
+
+    connect(proc, QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished), this,
+            [program, timedOut, timeoutMs, finish](int exitCode, QProcess::ExitStatus status) {
+        const bool ok = (status == QProcess::NormalExit && exitCode == 0);
+        const QString note = *timedOut
+            ? QStringLiteral("(%1 timed out after %2 s)").arg(program).arg(timeoutMs / 1000)
+            : status == QProcess::CrashExit
+                ? QStringLiteral("(%1 crashed or was killed)").arg(program)
+                : QStringLiteral("(%1 exited with code %2)").arg(program).arg(exitCode);
+        finish(ok, note);
+    });
+
+    // A program that can't be exec'd never emits finished — without this the
+    // step would hang forever (e.g. stuck on REBOOTING…).
+    connect(proc, &QProcess::errorOccurred, this, [proc, program, finish](QProcess::ProcessError error) {
+        if (error == QProcess::FailedToStart)
+            finish(false, QStringLiteral("(%1 failed to start: %2)").arg(program, proc->errorString()));
     });
 
     if (timeoutMs > 0) {
-        QTimer::singleShot(timeoutMs, proc, [proc]() {
-            if (proc->state() != QProcess::NotRunning)
+        QTimer::singleShot(timeoutMs, proc, [proc, timedOut]() {
+            if (proc->state() != QProcess::NotRunning) {
+                *timedOut = true;
                 proc->kill();
+            }
         });
     }
 
     proc->start(program, args);
 
-    if (feedPassword) {
+    if (feedPassword && proc->state() != QProcess::NotRunning) {
         proc->write(m_password);
         proc->write("\n");
         proc->closeWriteChannel();

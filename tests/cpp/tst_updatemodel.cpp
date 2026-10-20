@@ -10,6 +10,8 @@ class TestUpdateModel : public QObject {
 private slots:
     void init();
     void countStageMarkersCountsStepCalls();
+    void isInstallSummaryLineMatchesAnnotations();
+    void takeCompleteLinesReassemblesSplitChunks();
     void checkConnectionMockReachesReadyToCheck();
     void checkForUpdatesMockFindsUpdateAvailable();
     void checkForUpdatesMockUpToDate();
@@ -52,6 +54,37 @@ step "Building application"
     QFile realScript(DASH_INSTALL_SH);
     QVERIFY2(realScript.open(QIODevice::ReadOnly | QIODevice::Text), "could not open real install.sh");
     QVERIFY(UpdateModel::countStageMarkers(QString::fromUtf8(realScript.readAll())) > 0);
+}
+
+void TestUpdateModel::isInstallSummaryLineMatchesAnnotations()
+{
+    // install.sh's own indented "(...)" annotations and the closing total.
+    QVERIFY(UpdateModel::isInstallSummaryLine("    (Building application: 412s)"));
+    QVERIFY(UpdateModel::isInstallSummaryLine("    (build jobs: 1 of 4 cores, 512 MB available)"));
+    QVERIFY(UpdateModel::isInstallSummaryLine("    (ccache: 30 hits, 2 misses)"));
+    QVERIFY(UpdateModel::isInstallSummaryLine("Total install.sh time: 731s"));
+
+    // Ordinary tool output is not copied into the Device Log.
+    QVERIFY(!UpdateModel::isInstallSummaryLine("=== Building application ==="));
+    QVERIFY(!UpdateModel::isInstallSummaryLine("[ 42%] Building CXX object main.cpp.o"));
+    QVERIFY(!UpdateModel::isInstallSummaryLine("  (indented by two, not install.sh's four)"));
+    QVERIFY(!UpdateModel::isInstallSummaryLine(""));
+}
+
+void TestUpdateModel::takeCompleteLinesReassemblesSplitChunks()
+{
+    QString buf;
+    // A stage marker split across two reads is only returned once whole.
+    QCOMPARE(UpdateModel::takeCompleteLines(buf, "=== Building app"), QStringList());
+    QCOMPARE(buf, QString("=== Building app"));
+    QCOMPARE(UpdateModel::takeCompleteLines(buf, "lication ===\nnext"),
+             QStringList({"=== Building application ==="}));
+    QCOMPARE(buf, QString("next"));
+
+    // CRLF endings are stripped so anchored patterns still match.
+    QCOMPARE(UpdateModel::takeCompleteLines(buf, " line\r\n    (x: 1s)\r\n"),
+             QStringList({"next line", "    (x: 1s)"}));
+    QVERIFY(buf.isEmpty());
 }
 
 void TestUpdateModel::checkConnectionMockReachesReadyToCheck()
@@ -143,6 +176,16 @@ void TestUpdateModel::wrongPasswordThenCorrectPassword_fullInstallCycle()
     // machine end to end, which is exactly what users see in Settings.
     QTRY_COMPARE_WITH_TIMEOUT(model.state(), UpdateModel::InstallSucceeded, 15000);
     QCOMPARE(model.installProgress(), 1.0);
+    QVERIFY(model.errorText().isEmpty());
+
+    // A failed restart returns to the success screen with a reason, so
+    // RESTART NOW can be retried — never stuck on Rebooting.
+    qputenv("DASH_MOCK_UPDATE", "reboot-fail");
+    model.requestReboot();
+    QCOMPARE(model.state(), UpdateModel::Rebooting);
+    QTRY_COMPARE_WITH_TIMEOUT(model.state(), UpdateModel::InstallSucceeded, 2000);
+    QVERIFY(model.errorText().startsWith("Restart failed:"));
+    qunsetenv("DASH_MOCK_UPDATE");
 }
 
 QTEST_GUILESS_MAIN(TestUpdateModel)

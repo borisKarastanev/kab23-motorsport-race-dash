@@ -52,8 +52,9 @@ step "Priming fontconfig cache"
 # Qt builds the fontconfig cache on the first launch after a fresh image flash
 # — a 1-3s one-time hit that would otherwise land on the dashboard's very
 # first boot. The UI is all font.family: "monospace", so this is worth
-# priming here instead of paying for it live.
-fc-cache -f
+# priming here instead of paying for it live. Plain fc-cache (not -f) only
+# rebuilds caches that are missing or stale, so repeat updates skip it.
+fc-cache
 
 step "Migrating legacy user data out of build/"
 # The app now stores all persistent user data in a stable per-user directory
@@ -119,9 +120,40 @@ step "Building application"
 rm -rf "$REPO_DIR/build"
 mkdir -p "$REPO_DIR/build"
 chown -R "$DASHBOARD_USER:$DASHBOARD_USER" "$REPO_DIR/build"
+# Size parallelism by free memory, not core count: a Qt Quick translation unit
+# takes ~300-500 MB in cc1plus, the dashboard keeps running during an in-app
+# update, and swap is disabled (see "Trimming boot-irrelevant units"). On a
+# 1 GB Pi 4, -j$(nproc) = 4 compilers thrashed the page cache off the SD card
+# and stretched the build past 15 min.
+NPROC=$(nproc)
+MEM_AVAIL_MB=$(awk '/^MemAvailable:/ { print int($2 / 1024) }' /proc/meminfo)
+MEM_AVAIL_MB=${MEM_AVAIL_MB:-0}  # unreadable -> 1 job, never an arithmetic error under set -e
+JOBS=$(( MEM_AVAIL_MB / 450 ))
+[ "$JOBS" -lt 1 ] && JOBS=1
+[ "$JOBS" -gt "$NPROC" ] && JOBS=$NPROC
+echo "    (build jobs: $JOBS of $NPROC cores, ${MEM_AVAIL_MB} MB available)"
+# Pin ccache's directory explicitly: the build runs via sudo -u from a root
+# process, and the wipe above makes every update a full rebuild that is only
+# cheap if ccache actually hits. Stats are zeroed here and printed after the
+# build so the update log proves whether it did. Diagnostics only — `|| true`
+# so a ccache hiccup can never abort the install here, right after the build
+# dir was wiped.
+CCACHE_DIR="$USER_HOME/.cache/ccache"
+if command -v ccache > /dev/null; then
+    sudo -u "$DASHBOARD_USER" env CCACHE_DIR="$CCACHE_DIR" ccache -M 1G > /dev/null || true
+    sudo -u "$DASHBOARD_USER" env CCACHE_DIR="$CCACHE_DIR" ccache -z > /dev/null || true
+fi
 # Run cmake and make as the repo owner — Qt cmake macros write into the source
 # tree via configure_file, which fails when running as root.
-sudo -u "$DASHBOARD_USER" bash -c "cd '$REPO_DIR/build' && cmake .. -DCMAKE_BUILD_TYPE=Release && make -j\$(nproc)"
+sudo -u "$DASHBOARD_USER" env CCACHE_DIR="$CCACHE_DIR" \
+    bash -c "cd '$REPO_DIR/build' && cmake .. -DCMAKE_BUILD_TYPE=Release && make -j$JOBS"
+if command -v ccache > /dev/null; then
+    CCACHE_STATS=$(sudo -u "$DASHBOARD_USER" env CCACHE_DIR="$CCACHE_DIR" ccache --print-stats 2> /dev/null \
+        | awk -F'\t' '$1 == "direct_cache_hit" || $1 == "preprocessed_cache_hit" { h += $2; seen = 1 }
+                      $1 == "cache_miss" { m += $2; seen = 1 }
+                      END { if (seen) printf "%d hits, %d misses", h, m }')
+    echo "    (ccache: ${CCACHE_STATS:-stats unavailable})"
+fi
 
 step "Enabling NetworkManager control for the dashboard user"
 # Network Connection settings shell out to nmcli as the dashboard user (no
@@ -160,6 +192,27 @@ polkit.addRule(function(action, subject) {
 RULES
 # The Pi has no RTC; reading it as local time makes every DST/zone change wrong.
 sudo timedatectl set-local-rtc 0 || true
+
+step "Enabling reboot for the dashboard user"
+# The update screen's RESTART NOW runs `systemctl reboot` as the dashboard
+# user, no sudo (see UpdateModel::requestReboot). It used to pipe the update
+# password to `sudo reboot`, but that password is wiped when install.sh
+# finishes and sudo's cached credential expires after ~15 min — a long build
+# outlived it and RESTART NOW silently did nothing. Same "no active logind
+# session" gap as the NetworkManager rule above. Matched on the user rather
+# than netdev: rebooting is more privileged than nmcli. Unquoted heredoc so
+# $DASHBOARD_USER expands.
+sudo mkdir -p /etc/polkit-1/rules.d
+sudo tee /etc/polkit-1/rules.d/50-race-dash-reboot.rules > /dev/null << RULES
+polkit.addRule(function(action, subject) {
+    if ((action.id === "org.freedesktop.login1.reboot" ||
+         action.id === "org.freedesktop.login1.reboot-multiple-sessions" ||
+         action.id === "org.freedesktop.login1.reboot-ignore-inhibit") &&
+        subject.user === "$DASHBOARD_USER") {
+        return polkit.Result.YES;
+    }
+});
+RULES
 
 step "Granting backlight brightness control"
 # The Display settings page (DisplayModel) writes
@@ -328,14 +381,31 @@ sudo systemctl mask plymouth-quit.service plymouth-quit-wait.service
 # card boot on Pi 3/4 or Pi 5/CM5), so the split bought nothing and just
 # added complexity. Back to plain -R.
 sudo apt install -y plymouth plymouth-themes
-sudo rm -rf /usr/share/plymouth/themes/race-dash
-sudo cp -r "$REPO_DIR/plymouth/race-dash" /usr/share/plymouth/themes/race-dash
-# Tolerate failure of this step (under `set -e`): -R regenerates the initramfs,
-# which can fail on setups where the update-initramfs / raspi-firmware hook is
-# unhappy. A missing splash is cosmetic — don't abort the rest of provisioning
-# (systemd units, autostart) over it.
-sudo plymouth-set-default-theme -R race-dash \
-    || echo "WARNING: plymouth-set-default-theme failed (initramfs regen?); boot splash may not appear — continuing install."
+# Skip the copy + initramfs regen (minutes, for two kernels) when the shipped
+# theme is already installed, selected, and was last regenerated successfully
+# — the common case on an update. The stamp is written only after a
+# successful -R, so a failed regen is retried on the next run.
+THEME_SRC="$REPO_DIR/plymouth/race-dash"
+THEME_DST=/usr/share/plymouth/themes/race-dash
+SPLASH_STAMP=/var/lib/race-dash/splash-initramfs.ok
+if [ -f "$SPLASH_STAMP" ] && diff -rq "$THEME_SRC" "$THEME_DST" > /dev/null 2>&1 \
+    && [ "$(plymouth-set-default-theme 2> /dev/null)" = "race-dash" ]; then
+    echo "    (splash theme unchanged — skipping initramfs regen)"
+else
+    sudo rm -f "$SPLASH_STAMP"
+    sudo rm -rf "$THEME_DST"
+    sudo cp -r "$THEME_SRC" "$THEME_DST"
+    # Tolerate failure of this step (under `set -e`): -R regenerates the initramfs,
+    # which can fail on setups where the update-initramfs / raspi-firmware hook is
+    # unhappy. A missing splash is cosmetic — don't abort the rest of provisioning
+    # (systemd units, autostart) over it.
+    if sudo plymouth-set-default-theme -R race-dash; then
+        sudo mkdir -p "$(dirname "$SPLASH_STAMP")"
+        sudo touch "$SPLASH_STAMP"
+    else
+        echo "WARNING: plymouth-set-default-theme failed (initramfs regen?); boot splash may not appear — continuing install."
+    fi
+fi
 
 step "Trimming boot-irrelevant units"
 # This is a dedicated car dashboard, not a general-purpose desktop — these
