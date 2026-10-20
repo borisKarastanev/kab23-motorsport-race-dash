@@ -144,6 +144,10 @@ int CanDataModel::vehicleSpeedFromWheels() const
     const double kmh = m_brake.value
         ? *std::max_element(m_wheels.begin(), m_wheels.end())
         : (m_wheels[FL] + m_wheels[FR]) / 2.0;
+    // The MK60 reports a small non-zero offset at standstill; don't let it
+    // round up to a phantom 1 km/h.
+    if (kmh < kWheelSpeedDeadbandKmh)
+        return 0;
     return static_cast<int>(std::lround(kmh));
 }
 

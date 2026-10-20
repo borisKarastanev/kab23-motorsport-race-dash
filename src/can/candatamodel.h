@@ -70,6 +70,8 @@ public:
     // A wheel-speed reading older than this no longer drives speed — the GPS
     // fallback takes over so a dead ABS can't freeze the gauge at its last value.
     static constexpr qint64 kWheelSpeedStaleMs = 500;
+    // Wheel-derived speeds below this show as 0 (standstill sensor offset).
+    static constexpr double kWheelSpeedDeadbandKmh = 1.5;
     // Same idea for the driver inputs shown on the INPUTS screen.
     static constexpr qint64 kInputStaleMs = 500;
 
