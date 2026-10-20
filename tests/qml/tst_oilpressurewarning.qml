@@ -5,7 +5,6 @@ import "../../qml" as App
 // Wiring only — the pulse itself is AlertPulse's, covered via tst_gauge.
 TestCase {
     name: "OilPressureWarning"
-    when: windowShown
 
     Component {
         id: warningComp
@@ -13,7 +12,9 @@ TestCase {
     }
 
     function test_pulsesWhileShownAndResetsWhenHidden() {
-        const w = createTemporaryObject(warningComp, this)
+        // Parentless, like tst_gauge: the TestCase item itself is never
+        // visible, so a child of it would be hidden and never pulse.
+        const w = createTemporaryObject(warningComp, null)
         verify(w !== null)
         tryVerify(() => w.pulseAlpha < 1.0, 1000)
 
