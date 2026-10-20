@@ -5,6 +5,7 @@
 #include <QStringList>
 #include <QByteArray>
 #include <QProcess>
+#include <QFile>
 #include <functional>
 
 class QNetworkAccessManager;
@@ -15,7 +16,9 @@ class QNetworkAccessManager;
 // binary at build time (DASH_VERSION, from CMake PROJECT_VERSION). Installing
 // checks out the new tag and runs install.sh under sudo, piping a
 // once-per-operation password collected via a QML modal — nothing is stored
-// on disk. See qml/settings/AppVersionDetail.qml for the state -> UI mapping.
+// on disk. The password is wiped as soon as install.sh exits; the follow-up
+// reboot needs none (polkit rule from install.sh). See
+// qml/settings/AppVersionDetail.qml for the state -> UI mapping.
 class UpdateModel : public QObject {
     Q_OBJECT
 public:
@@ -58,6 +61,12 @@ public:
     // (no file I/O) so it's directly unit-testable; countInstallStages() below
     // is the file-reading wrapper actually used at runtime.
     static int countStageMarkers(const QString &scriptText);
+    // True for install.sh's summary lines (per-step timings, build jobs,
+    // ccache stats, total time) — the ones copied into the Device Log.
+    static bool isInstallSummaryLine(const QString &line);
+    // Appends `chunk` to `buffer` and removes and returns the complete lines
+    // (trailing '\r' stripped); an unterminated tail stays in `buffer`.
+    static QStringList takeCompleteLines(QString &buffer, const QString &chunk);
 
     Q_INVOKABLE void checkConnection();
     Q_INVOKABLE void checkForUpdates();
@@ -84,6 +93,13 @@ private:
     void runValidatePassword();
     void runInstallScript();
     int  countInstallStages() const;
+    void openInstallLog();
+    void appendInstallLog(const QString &text);
+    void closeInstallLog(const QString &trailer);
+    void logInstallOutput(const QString &chunk);
+    void flushInstallOutput();
+    void handleInstallLine(const QString &line);
+    void onRebootFailed(const QString &output);
     void runRollbackCheckout(const QString &reason);
     void beginInstalling();
     void startProcessStep(const QString &program, const QStringList &args, int timeoutMs,
@@ -108,6 +124,8 @@ private:
     QNetworkAccessManager *m_nam = nullptr;
     QProcess *m_proc = nullptr;
     QString m_procOutputTail;
+    QFile   m_installLog;     // <data dir>/update.log — full output of the last install.sh run
+    QString m_installLineBuf; // unterminated tail of the last output chunk
     int m_installStagesSeen = 0;
 
     // Recomputed by countInstallStages() right before each real install run

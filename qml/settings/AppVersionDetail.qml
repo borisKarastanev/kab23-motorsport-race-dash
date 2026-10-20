@@ -244,6 +244,17 @@ Item {
                 font.letterSpacing: 1
             }
 
+            // Set only when RESTART NOW failed — the button stays to retry.
+            Text {
+                Layout.fillWidth: true
+                visible: updateModel.errorText !== ""
+                text: updateModel.errorText
+                color: "#cc4444"
+                font.pixelSize: 10
+                font.family: "monospace"
+                wrapMode: Text.WordWrap
+            }
+
             Text {
                 Layout.fillWidth: true
                 text: "WARNING: DO NOT SWITCH OFF THE ENGINE UNTIL THE DASHBOARD IS BACK UP"
