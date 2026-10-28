@@ -15,6 +15,13 @@ Rectangle {
         return s + "." + String(t).padStart(3, "0")
     }
 
+    // Placeholder matches the width of a real "m:ss.mmm" time — the shared
+    // "--:--.---" is one char wider, which at these sizes pushed the grid
+    // past the card edge until a best lap existed.
+    function formatLap(ms) {
+        return ms > 0 ? Fmt.formatMs(ms) : "-:--.---"
+    }
+
     function formatDelta(ms) {
         const sign = ms <= 0 ? "-" : "+"
         return sign + formatSubSecond(Math.abs(ms))
@@ -57,9 +64,9 @@ Rectangle {
                 font.letterSpacing: 2
             }
             Text {
-                text: Fmt.formatMs(raceBoxModel.currentLapMs)
+                text: formatLap(raceBoxModel.currentLapMs)
                 color: "#ffffff"
-                font.pixelSize: 24
+                font.pixelSize: 26
                 font.bold: true
                 font.family: "monospace"
             }
@@ -70,7 +77,7 @@ Rectangle {
                 visible: raceBoxModel.bestLapMs > 0
                 text: formatDelta(raceBoxModel.currentDeltaMs)
                 color: raceBoxModel.currentDeltaMs <= 0 ? "#00cc44" : "#cc2222"
-                font.pixelSize: 18
+                font.pixelSize: 20
                 font.bold: true
                 font.family: "monospace"
             }
@@ -86,14 +93,14 @@ Rectangle {
                 font.letterSpacing: 2
             }
             Text {
-                text: Fmt.formatMs(raceBoxModel.lastLapMs)
+                text: formatLap(raceBoxModel.lastLapMs)
                 color: {
                     if (raceBoxModel.lastLapMs <= 0) return "#555555"
                     if (raceBoxModel.bestLapMs > 0 && raceBoxModel.lastLapMs === raceBoxModel.bestLapMs)
                         return "#00cc44"
                     return "#cc2222"
                 }
-                font.pixelSize: 20
+                font.pixelSize: 22
                 font.bold: true
                 font.family: "monospace"
             }
@@ -111,9 +118,9 @@ Rectangle {
                 font.letterSpacing: 2
             }
             Text {
-                text: Fmt.formatMs(raceBoxModel.bestLapMs)
+                text: formatLap(raceBoxModel.bestLapMs)
                 color: raceBoxModel.bestLapMs > 0 ? "#00cc44" : "#555555"
-                font.pixelSize: 20
+                font.pixelSize: 22
                 font.bold: true
                 font.family: "monospace"
             }
