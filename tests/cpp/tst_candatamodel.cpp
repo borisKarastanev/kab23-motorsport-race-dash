@@ -43,6 +43,17 @@ private slots:
     void oilPressureWarningExpiresWhenDme4Stale();
     void oilPressureWarningClearsWhenRpmStale();
     void shortDme4FrameStillDecodesOilTemp();
+    void absFaultIgnoresKeyOnBulbCheck();
+    void absFaultShowsAfterDebounceAndExpires();
+    void absFaultWaitsForCarToRoll();
+    void absActiveNeedsConsecutiveSlipFrames();
+    void absActiveSlipRunBrokenByWheelSpeedGap();
+    void absActiveHoldsThenClears();
+    void absActiveIgnoresSlipWithoutBrake();
+    void absActiveIgnoresStaleBrake();
+    void absActiveIgnoresLowSpeedAndSmallSlip();
+    void absActiveIgnoresDeadWheelSensor();
+    void absActiveIgnoresLowReadingWheelSensor();
 };
 
 void TestCanDataModel::rpmDecodesAndEmitsImmediately()
@@ -477,6 +488,169 @@ void TestCanDataModel::shortDme4FrameStillDecodesOilTemp()
 
     QVERIFY(!feedUntil(model, {CanFrames::rpm(2000), shortFrame}, kSettleMs,
                        [&] { return model.oilPressureWarning(); }));
+}
+
+void TestCanDataModel::absFaultIgnoresKeyOnBulbCheck()
+{
+    CanDataModel model;
+    QSignalSpy spy(&model, &CanDataModel::absFaultChanged);
+
+    // First frame, lamp off: validity alone must not notify.
+    model.onFrame(CanFrames::asc1(0x7F)); // every bit except the ABS lamp
+    QTest::qWait(150);
+    QCOMPARE(spy.count(), 0);
+
+    // MK60 self-test lights the lamp ~2 s, then clears it — not a fault.
+    const auto fault = [&] { return model.absFault(); };
+    QVERIFY(!feedUntil(model, {CanFrames::asc1(CanScaling::kAbsLedBit)},
+                       CanDataModel::kAbsFaultDebounceMs - 1000, fault));
+    QVERIFY(!feedUntil(model, {CanFrames::asc1(0x00)}, 300, fault));
+    QCOMPARE(spy.count(), 0);
+}
+
+void TestCanDataModel::absFaultShowsAfterDebounceAndExpires()
+{
+    CanDataModel model;
+    QSignalSpy spy(&model, &CanDataModel::absFaultChanged);
+    model.onFrame(CanFrames::wheelSpeeds(30.0, 30.0, 30.0, 30.0)); // car has rolled
+
+    QVERIFY(feedUntil(model, {CanFrames::asc1(CanScaling::kAbsLedBit)},
+                      CanDataModel::kAbsFaultDebounceMs + 500, [&] { return model.absFault(); }));
+    QVERIFY(!model.brakePressed());
+    QCOMPARE(spy.count(), 1);
+
+    // A dead ASC1 must not latch the lamp on.
+    QTRY_VERIFY_WITH_TIMEOUT(!model.absFault(), CanDataModel::kInputStaleMs + 500);
+    QCOMPARE(spy.count(), 2);
+}
+
+void TestCanDataModel::absFaultWaitsForCarToRoll()
+{
+    CanDataModel model;
+    const auto fault = [&] { return model.absFault(); };
+
+    // Sitting in the pits: the MK60 keeps its lamp on until the wheels move.
+    QVERIFY(!feedUntil(model, {CanFrames::asc1(CanScaling::kAbsLedBit),
+                               CanFrames::wheelSpeeds(0.0, 0.0, 0.0, 0.0)},
+                       CanDataModel::kAbsFaultDebounceMs + 500, fault));
+
+    // Still lit once the car has rolled: a real fault, after the debounce.
+    QVERIFY(feedUntil(model, {CanFrames::asc1(CanScaling::kAbsLedBit),
+                              CanFrames::wheelSpeeds(30.0, 30.0, 30.0, 30.0)},
+                      CanDataModel::kAbsFaultDebounceMs + 500, fault));
+}
+
+// Other wheels at `ref`, FL at `fl` (RL at `rl`, default `ref`) — braking
+// unless told otherwise.
+static void sendSlipFrame(CanDataModel &model, double fl, bool brake = true, double ref = 100.0,
+                          double rl = -1.0)
+{
+    model.onFrame(CanFrames::asc1(brake ? CanScaling::kBrakeBit : 0));
+    model.onFrame(CanFrames::wheelSpeeds(fl, ref, rl < 0 ? ref : rl, ref));
+}
+
+void TestCanDataModel::absActiveNeedsConsecutiveSlipFrames()
+{
+    CanDataModel model;
+    QSignalSpy spy(&model, &CanDataModel::absActiveChanged);
+
+    sendSlipFrame(model, 60.0);   // one noisy frame
+    sendSlipFrame(model, 100.0);  // recovered — resets the run
+    sendSlipFrame(model, 60.0);
+    QVERIFY(!model.absActive());
+
+    sendSlipFrame(model, 60.0);   // second in a row
+    QVERIFY(model.absActive());
+    QTRY_COMPARE_WITH_TIMEOUT(spy.count(), 1, 500);
+}
+
+void TestCanDataModel::absActiveSlipRunBrokenByWheelSpeedGap()
+{
+    CanDataModel model;
+    sendSlipFrame(model, 60.0);
+    // 0x1F0 goes quiet; the next slip frame starts a new run, not the second.
+    QTest::qWait(CanDataModel::kAbsSlipGapMs + 100);
+    sendSlipFrame(model, 60.0);
+    QVERIFY(!model.absActive());
+}
+
+void TestCanDataModel::absActiveHoldsThenClears()
+{
+    CanDataModel model;
+    for (int i = 0; i < CanDataModel::kAbsSlipFrames; ++i)
+        sendSlipFrame(model, 60.0);
+    QVERIFY(model.absActive());
+
+    // Wheel recovers between pump cycles — the lamp holds across notify ticks
+    // instead of flickering. Only asserted while inside the hold window, so a
+    // stalled CI runner can't turn this into a false failure.
+    QElapsedTimer t;
+    t.start();
+    sendSlipFrame(model, 100.0);
+    QTest::qWait(150);
+    if (t.elapsed() < CanDataModel::kAbsHoldMs - 100)
+        QVERIFY(model.absActive());
+
+    // No further slip (or no frames at all): the hold runs out.
+    QTRY_VERIFY_WITH_TIMEOUT(!model.absActive(), CanDataModel::kAbsHoldMs + 500);
+}
+
+void TestCanDataModel::absActiveIgnoresSlipWithoutBrake()
+{
+    CanDataModel model;
+    for (int i = 0; i < 5; ++i)
+        sendSlipFrame(model, 60.0, false);
+    QVERIFY(!model.absActive());
+}
+
+void TestCanDataModel::absActiveIgnoresStaleBrake()
+{
+    CanDataModel model;
+    model.onFrame(CanFrames::asc1(CanScaling::kBrakeBit));
+    QTest::qWait(CanDataModel::kInputStaleMs + 50); // ASC1 dies with the bit on
+    for (int i = 0; i < 5; ++i)
+        model.onFrame(CanFrames::wheelSpeeds(60.0, 100.0, 100.0, 100.0));
+    QVERIFY(!model.absActive());
+}
+
+void TestCanDataModel::absActiveIgnoresLowSpeedAndSmallSlip()
+{
+    CanDataModel model;
+    for (int i = 0; i < 5; ++i)
+        sendSlipFrame(model, 85.0); // 15 % — tight-corner territory, not ABS
+    QVERIFY(!model.absActive());
+
+    for (int i = 0; i < 5; ++i)
+        sendSlipFrame(model, 5.0, true, CanDataModel::kAbsMinSpeedKmh - 1.0); // near standstill
+    QVERIFY(!model.absActive());
+}
+
+void TestCanDataModel::absActiveIgnoresDeadWheelSensor()
+{
+    CanDataModel model;
+    // RL reads 0 while the car rolls unbraked — a dead sensor, not a lock.
+    sendSlipFrame(model, 100.0, false, 100.0, 0.0);
+
+    for (int i = 0; i < 5; ++i)
+        sendSlipFrame(model, 100.0, true, 100.0, 0.0);
+    QVERIFY(!model.absActive());
+
+    // The remaining three wheels still detect real slip.
+    for (int i = 0; i < CanDataModel::kAbsSlipFrames; ++i)
+        sendSlipFrame(model, 60.0, true, 100.0, 0.0);
+    QVERIFY(model.absActive());
+}
+
+void TestCanDataModel::absActiveIgnoresLowReadingWheelSensor()
+{
+    CanDataModel model;
+    // RL reads 40 % low while the car rolls unbraked — a failing sensor or
+    // tone ring, not a wheel the ABS is working on.
+    sendSlipFrame(model, 100.0, false, 100.0, 60.0);
+
+    for (int i = 0; i < 5; ++i)
+        sendSlipFrame(model, 100.0, true, 100.0, 60.0);
+    QVERIFY(!model.absActive());
 }
 
 QTEST_GUILESS_MAIN(TestCanDataModel)

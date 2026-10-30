@@ -61,7 +61,7 @@ inline QCanBusFrame steering(double deg)
 inline QCanBusFrame asc1(quint8 byte0)
 {
     QByteArray payload(8, 0x00);
-    payload[CanScaling::kOffsetBrake] = static_cast<char>(byte0);
+    payload[CanScaling::kOffsetAsc1Status] = static_cast<char>(byte0);
     return QCanBusFrame(CanScaling::kFrameAsc1, payload);
 }
 

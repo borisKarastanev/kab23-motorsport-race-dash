@@ -10,6 +10,8 @@ constexpr int IDLE_RPM    =  650;
 constexpr int CYCLE_TICKS = 1150; // 23.0 s at 50 Hz
 constexpr int STEER_TICKS =  400; //  8.0 s at 50 Hz
 constexpr double KMH_PER_RPM = 0.03; // rough single-gear correlation: 6800 rpm ≈ 204 km/h
+constexpr double ABS_MIN_KMH = 80.0; // simulated ABS stops only above this speed
+constexpr int    ABS_PULSE_TICKS = 5; // 100 ms modulation windows at 50 Hz
 
 } // namespace
 
@@ -19,6 +21,7 @@ static constexpr quint64 OIL_RAMP_TICKS     = 4500; // 90 s at 50 Hz
 MockCanProvider::MockCanProvider(QObject *parent)
     : ICanProvider(parent)
     , m_oilPressureLow(qEnvironmentVariableIsSet("MOCK_OIL_PRESSURE_LOW"))
+    , m_absFault(qEnvironmentVariableIsSet("MOCK_ABS_FAULT"))
 {
     m_timer.setInterval(20); // 50 Hz
     connect(&m_timer, &QTimer::timeout, this, &MockCanProvider::onTick);
@@ -45,12 +48,18 @@ void MockCanProvider::onTick()
     emit frameReady(CanFrames::dme4(20.0 + oilProgress * 90.0, m_oilPressureLow));
 
     // Wheel speeds track RPM; rears read ~2% high to mimic driven-wheel slip.
+    // Hard braking at speed simulates ABS: FL dips 30% on alternate 100 ms
+    // windows, like a wheel the MK60 is releasing and reapplying.
     const double kmh = rpm * KMH_PER_RPM;
-    emit frameReady(CanFrames::wheelSpeeds(kmh, kmh, kmh * 1.02, kmh * 1.02));
+    const bool braking = rpm < m_prevRpm; // braking while revs fall
+    // Brake switch first, as it would be on the bus ahead of the slip it causes.
+    emit frameReady(CanFrames::asc1((braking ? CanScaling::kBrakeBit : 0)
+                                    | (m_absFault ? CanScaling::kAbsLedBit : 0)));
+    const bool absDip = braking && kmh > ABS_MIN_KMH && (m_tick / ABS_PULSE_TICKS) % 2 == 0;
+    emit frameReady(CanFrames::wheelSpeeds(absDip ? kmh * 0.7 : kmh, kmh, kmh * 1.02, kmh * 1.02));
 
     const double steerPhase = (static_cast<double>(m_tick % STEER_TICKS) / STEER_TICKS) * 2.0 * M_PI;
     emit frameReady(CanFrames::steering(90.0 * std::sin(steerPhase)));
 
-    emit frameReady(CanFrames::asc1(rpm < m_prevRpm ? CanScaling::kBrakeBit : 0)); // braking while revs fall
     m_prevRpm = rpm;
 }

@@ -107,9 +107,15 @@ inline double decodeSteering(const char *src)
     return (raw & kSteeringSignBit) ? -mag : mag;
 }
 
-// 0x153 ASC1: byte 0 bit 4 = brake light switch
-constexpr quint32 kFrameAsc1   = 0x153;
-constexpr int     kOffsetBrake = 0;
-constexpr quint8  kBrakeBit    = 0x10;
+// 0x153 ASC1: byte 0 is a status bitfield. Bit 4 = brake light switch (LV_BLS).
+// Bits 5-7 per ms4x.net: LV_BAS (brake assist), LV_EBV (brake force
+// distribution), LV_ABS_LED (the cluster's ABS warning lamp — a fault, NOT
+// "ABS regulating"; no such bit is documented). Undescribed there — verify.
+constexpr quint32 kFrameAsc1        = 0x153;
+constexpr int     kOffsetAsc1Status = 0;
+constexpr quint8  kBrakeBit         = 0x10;
+constexpr quint8  kBasBit           = 0x20;
+constexpr quint8  kEbvBit           = 0x40;
+constexpr quint8  kAbsLedBit        = 0x80;
 
 } // namespace CanScaling

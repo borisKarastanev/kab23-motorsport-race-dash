@@ -49,18 +49,13 @@ Item {
         Repeater {
             model: root.ledCount
 
-            Rectangle {
+            Led {
                 // Mirror index so both halves resolve to the same pair threshold
                 readonly property int pairIndex: index < (root.ledCount / 2)
                                                  ? index
                                                  : (root.ledCount - 1 - index)
-                readonly property bool lit: root.rpm >= root.pairThresholds[pairIndex]
-
-                readonly property color ledColor: {
-                    if (!lit) return "#181818"
-                    if (root.isAllBlue) return "#0088ff"
-                    return root.pairBaseColors[pairIndex]
-                }
+                lit: root.rpm >= root.pairThresholds[pairIndex]
+                ledColor: root.isAllBlue ? "#0088ff" : root.pairBaseColors[pairIndex]
 
                 // Flash: centre pair when red zone active; all lit LEDs once all-blue kicks in
                 readonly property bool shouldFlash: {
@@ -71,20 +66,7 @@ Item {
 
                 width:  (root.width - (root.ledCount - 1) * 6) / root.ledCount
                 height: root.height
-                radius: 4
-                color:  ledColor
-                border.color: lit ? Qt.darker(ledColor, 1.5) : "#2a2a2a"
-                border.width: 1
                 opacity: shouldFlash ? root.flashAlpha : 1.0
-
-                Rectangle {
-                    visible: parent.lit
-                    anchors { top: parent.top; left: parent.left; right: parent.right; margins: 1 }
-                    height: parent.height * 0.35
-                    radius: parent.radius
-                    color:  "white"
-                    opacity: 0.18
-                }
             }
         }
     }
