@@ -248,6 +248,7 @@ Item {
             }
 
             ColumnLayout {
+                id: centerLane
                 Layout.fillWidth: true
                 Layout.fillHeight: true
                 spacing: 8
@@ -288,6 +289,23 @@ Item {
             height: 32
             onResetFinishLineRequested: finishResetOverlay.visible = true
         }
+    }
+
+    // Footer ABS indicator. Centred under the speed card's km/h label when the
+    // card is in the centre lane (the card fills its lane, and the lanes row
+    // and footer share x = 0, so the lane's centre is already in footer
+    // coordinates); footer centre otherwise, since under a side-lane card it
+    // would cover the RaceBox/GPS/battery status or the footer buttons.
+    // No MouseArea, so taps reach anything beneath it.
+    AbsLamp {
+        parent: statusBar
+        x: (dashboardRoot.lanes[1].indexOf("speed") !== -1
+            ? centerLane.x + centerLane.width / 2
+            : statusBar.width / 2) - width / 2
+        anchors.verticalCenter: parent.verticalCenter
+        active: dataModel.absActive
+        fault: dataModel.absFault
+        pulseEnabled: dashboardRoot.onScreen
     }
 
     // ── finish line reset confirmation overlay ──────────────

@@ -54,6 +54,8 @@
         <file>qml/LedStrip.qml</file>
         <file>qml/LapTimer.qml</file>
         <file>qml/StatusBar.qml</file>
+        <file>qml/AbsLamp.qml</file>
+        <file>qml/Led.qml</file>
         <file>data/track-db.json</file>
     </qresource>
 </RCC>

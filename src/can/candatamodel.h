@@ -35,6 +35,11 @@ class CanDataModel : public QObject {
     // the full-screen warning. The bit goes stale like the driver inputs, so a
     // dead bus clears it rather than latching the warning on.
     Q_PROPERTY(bool oilPressureWarning READ oilPressureWarning NOTIFY oilPressureWarningChanged)
+    // ABS regulating — derived from wheel slip under braking; ASC1 has no
+    // documented "ABS active" bit. See the kAbs* constants.
+    Q_PROPERTY(bool absActive READ absActive NOTIFY absActiveChanged)
+    // MK60 ABS warning lamp (0x153 LV_ABS_LED) — ABS may be off. See kAbsFault*.
+    Q_PROPERTY(bool absFault READ absFault NOTIFY absFaultChanged)
     Q_PROPERTY(bool speedFromWheels READ speedFromWheels NOTIFY speedFromWheelsChanged)
     Q_PROPERTY(double wheelSpeedFL READ wheelSpeedFL NOTIFY wheelSpeedsChanged)
     Q_PROPERTY(double wheelSpeedFR READ wheelSpeedFR NOTIFY wheelSpeedsChanged)
@@ -61,7 +66,9 @@ public:
     double coolantTemp() const { return m_coolantTemp; }
     double oilTemp()     const { return m_oilTemp; }
     bool   oilTempSeen() const { return m_oilTempSeen; }
-    bool   oilPressureWarning() const { return m_oilPressureWarning; }
+    bool   oilPressureWarning() const { return m_oilPressureWarning.state; }
+    bool   absActive()   const { return m_absActive; }
+    bool   absFault()    const { return m_absFault.state; }
     int    speed()       const { return m_speed; }
     bool   speedFromWheels() const { return m_speedFromWheels; }
     double wheelSpeedFL()  const { return m_wheels[FL]; }
@@ -88,6 +95,25 @@ public:
     // How long "low pressure while running" must hold before the warning shows
     // (and how long it must be gone before the warning clears).
     static constexpr qint64 kOilPressureDebounceMs = 1000;
+    // ABS-active: brake on and a wheel kAbsSlipRatio behind the fastest, for
+    // kAbsSlipFrames frames, held kAbsHoldMs. Cornering spreads the wheels
+    // too, but at ~1 g the inside-rear/outside-front gap reaches 20 % only
+    // below ~34 km/h, so above kAbsMinSpeedKmh a 20 % gap can't be the corner.
+    static constexpr double kAbsSlipRatio   = 0.20;
+    static constexpr double kAbsMinSpeedKmh = 40.0;
+    static constexpr int    kAbsSlipFrames  = 2;
+    // Slip frames further apart than this aren't "consecutive" — a few 0x1F0
+    // periods, well short of the 500 ms stale timeout.
+    static constexpr qint64 kAbsSlipGapMs   = 100;
+    static constexpr qint64 kAbsHoldMs      = 500;
+    // ABS fault: the lamp bit counts only once the car has rolled past
+    // kAbsFaultMinSpeedKmh (the MK60 keeps it on until it sees the wheels
+    // move), then must hold longer than the ~2 s key-on bulb check.
+    static constexpr qint64 kAbsFaultDebounceMs = 3000;
+    static constexpr double kAbsFaultMinSpeedKmh = 10.0;
+    // Device Log lines for ASC1 bits 5-7 per run — enough to see whether a bit
+    // tracks ABS, without flooding the log if one toggles every brake zone.
+    static constexpr int    kAsc1StatusLogLimit = 20;
 
 public slots:
     void onFrame(const QCanBusFrame &frame);
@@ -99,6 +125,8 @@ signals:
     void oilTempChanged();
     void oilTempSeenChanged();
     void oilPressureWarningChanged();
+    void absActiveChanged();
+    void absFaultChanged();
     void speedChanged();
     void speedFromWheelsChanged();
     void wheelSpeedsChanged();
@@ -123,6 +151,8 @@ private:
     static constexpr quint16 kDirtyBrake       = 0x200;
     static constexpr quint16 kDirtyThrottle    = 0x400;
     static constexpr quint16 kDirtyOilPressure = 0x800;
+    static constexpr quint16 kDirtyAbsActive   = 0x1000;
+    static constexpr quint16 kDirtyAbsFault    = 0x2000;
 
     enum Wheel { FL, FR, RL, RR }; // matches the 0x1F0 field order
 
@@ -133,6 +163,19 @@ private:
         T value{};
         bool valid = false;
         QElapsedTimer clock; // restarted on every frame; invalid until the first
+
+        // The value as of right now: neutral once the frame has gone quiet,
+        // even before the next notify tick's expireInput() catches up. For
+        // per-frame readers that mustn't act on a latched value.
+        T live() const { return fresh(clock, kInputStaleMs) ? value : T{}; }
+    };
+
+    // A flag that follows its raw input only once the input has held the new
+    // state for riseMs (turning on) or fallMs (turning off).
+    struct Debounced {
+        bool state = false;
+        QElapsedTimer pending; // running while the raw input disagrees with state
+        bool update(bool raw, qint64 riseMs, qint64 fallMs); // true when state flips
     };
 
     static bool fresh(const QElapsedTimer &clock, qint64 staleMs);
@@ -140,11 +183,19 @@ private:
     template <typename T> void updateInput(Input<T> &in, T value, bool valid, quint16 dirtyBit);
     template <typename T> void expireInput(Input<T> &in, quint16 dirtyBit);
     void expireStaleInputs();
+    double fastestWheel() const;
     int  vehicleSpeedFromWheels() const;
     void applySpeed(int kmh);
     void updateSpeedSource();
     bool engineRunning() const;
     void updateOilPressureWarning();
+    bool wheelsSlipping() const;
+    void updateAbsActive();
+    void expireAbsActive();
+    static bool lagging(double kmh, double ref);
+    void updateImplausibleWheels();
+    void updateAbsFromWheels();
+    void logAsc1StatusBits(quint8 byte0);
 
     int    m_rpm         = 0;
     QElapsedTimer m_rpmClock;    // restarted on every 0x316; invalid until the first
@@ -160,9 +211,17 @@ private:
     Input<bool>   m_brake;
     Input<double> m_throttle;
     Input<bool>   m_oilPressureLow; // raw 0x545 bit, fresh-gated like the inputs
-    bool   m_oilPressureWarning = false;
-    QElapsedTimer m_oilPressureDebounce; // running while the raw state disagrees with the warning
+    Debounced m_oilPressureWarning;
     bool   m_dme4ShortWarned = false;
+    Input<bool>   m_absLampRaw;      // raw LV_ABS_LED, fresh-gated like the inputs
+    Debounced m_absFault;
+    bool   m_absActive = false;
+    int    m_absSlipFrames = 0;      // consecutive 0x1F0 frames showing slip, capped at kAbsSlipFrames
+    QElapsedTimer m_absLastSlip;     // restarted on every slipping 0x1F0 frame
+    std::array<bool, 4> m_wheelImplausible{}; // read kAbsSlipRatio low while rolling unbraked
+    bool   m_hasRolled = false;      // wheels have passed kAbsFaultMinSpeedKmh this run
+    int    m_asc1StatusBits = -1;    // last logged byte 0 bits 5-7; -1 = none yet
+    int    m_asc1StatusLogged = 0;   // lines written, capped at kAsc1StatusLogLimit
     QElapsedTimer m_wheelSpeedClock; // restarted on every 0x1F0; invalid until the first
     int    m_gear        = 0;
 
