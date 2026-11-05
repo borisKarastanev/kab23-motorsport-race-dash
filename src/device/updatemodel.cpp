@@ -37,8 +37,8 @@ const QStringList kMockInstallStages = {
     "Enabling Bluetooth adapter",
     "Enabling persistent journald logging",
     "Installing systemd CAN service",
-    "Installing dashboard system service (console/eglfs mode)",
     "Installing XDG autostart (desktop/Wayland/X11 mode)",
+    "Activating new build",
     "Done"
 };
 
@@ -57,7 +57,8 @@ QString UpdateModel::currentVersion() const
 
 QString UpdateModel::repoRoot() const
 {
-    // The binary lives in <repo>/build/bmw-e46-dash
+    // The binary runs from <repo>/bin/ (deployed) or <repo>/build/ (dev) —
+    // always one level below the repo root.
     QDir dir(QCoreApplication::applicationDirPath());
     dir.cdUp();
     return dir.absolutePath();
@@ -282,16 +283,19 @@ void UpdateModel::beginInstalling()
     setState(Installing);
 }
 
+QStringList UpdateModel::stageNames(const QString &scriptText)
+{
+    static const QRegularExpression stepCall(R"re(^step "(.+)"$)re", QRegularExpression::MultilineOption);
+    QStringList names;
+    QRegularExpressionMatchIterator it = stepCall.globalMatch(scriptText);
+    while (it.hasNext())
+        names << it.next().captured(1);
+    return names;
+}
+
 int UpdateModel::countStageMarkers(const QString &scriptText)
 {
-    static const QRegularExpression stepCall(R"(^step ".+"$)", QRegularExpression::MultilineOption);
-    QRegularExpressionMatchIterator it = stepCall.globalMatch(scriptText);
-    int count = 0;
-    while (it.hasNext()) {
-        it.next();
-        ++count;
-    }
-    return count;
+    return int(stageNames(scriptText).size());
 }
 
 bool UpdateModel::isInstallSummaryLine(const QString &line)
@@ -427,14 +431,32 @@ void UpdateModel::runRollbackCheckout(const QString &reason)
     zeroPassword();
     startProcessStep("git", { "checkout", "-f", m_rollbackRef }, 15000,
         [this, reason](bool ok, const QString &output) {
-            closeInstallLog(ok ? QStringLiteral("rolled back to %1").arg(m_rollbackRef)
-                               : QStringLiteral("rollback to %1 FAILED: %2")
-                                     .arg(m_rollbackRef, lastLines(output, 5)));
-            const QString suffix = ok
-                ? " — rolled back to the previous version."
-                : " — rollback ALSO FAILED; manual recovery needed.";
-            setState(InstallFailed, reason + suffix);
+            const RollbackOutcome r = describeRollback(ok, m_rollbackRef, output, m_installStage);
+            closeInstallLog(r.logTrailer);
+            setState(InstallFailed, reason + r.errorSuffix);
         });
+}
+
+UpdateModel::RollbackOutcome UpdateModel::describeRollback(bool checkoutOk, const QString &ref,
+                                                         const QString &checkoutOutput,
+                                                         const QString &failedStage)
+{
+    if (!checkoutOk) {
+        return { QStringLiteral("rollback to %1 FAILED: %2").arg(ref, lastLines(checkoutOutput, 5)),
+                 QStringLiteral(" — rollback ALSO FAILED; manual recovery needed.") };
+    }
+
+    // install.sh only touches what the next boot runs (binary + unit) in its
+    // final stage, so any earlier failure leaves the previous version intact.
+    // A failure inside that stage may have swapped either one already.
+    if (failedStage == kActivationStage) {
+        return { QStringLiteral("rolled back source to %1, but failed during '%2'").arg(ref, failedStage),
+                 QStringLiteral(" — failed while activating the new build; the installed app"
+                                " may be partially updated. Check it before the next restart.") };
+    }
+
+    return { QStringLiteral("rolled back to %1").arg(ref),
+             QStringLiteral(" — rolled back; the previous app version stays installed.") };
 }
 
 void UpdateModel::requestReboot()

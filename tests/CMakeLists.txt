@@ -57,6 +57,10 @@ target_compile_definitions(tst_updatemodel PRIVATE DASH_INSTALL_SH="${APP_SRC_DI
 add_test(NAME tst_updatemodel COMMAND tst_updatemodel)
 set_tests_properties(tst_updatemodel PROPERTIES ENVIRONMENT "${DASH_TEST_ENV}")
 
+# ── install.sh binary deployment (shell, no sudo/apt/systemctl) ───────
+add_test(NAME tst_install_promote
+         COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/sh/tst_install_promote.sh ${APP_SRC_DIR})
+
 # ── trackmodel: filtering + finish-line fallback ──────────────────────
 # Uses QStandardPaths::setTestModeEnabled() (see tst_trackmodel.cpp) to sandbox
 # AppPaths-backed persistence away from the real user's data directory.
@@ -197,7 +201,13 @@ set_tests_properties(tst_timemodel PROPERTIES ENVIRONMENT "${DASH_TEST_ENV}")
 # so no dependency on ${RESOURCES} here. Qt6::Qml is needed directly for the
 # QQmlEngine/QQmlContext mock-context-property setup in tst_qml_runner.cpp
 # (DisplaySettings.qml reads its model as a bare context property).
-add_executable(tst_qml_runner qml/tst_qml_runner.cpp)
-target_link_libraries(tst_qml_runner PRIVATE Qt6::QuickTest Qt6::Qml)
+# updatemodel.cpp is linked in so AppVersionDetail.qml can be tested against
+# the real (mock-mode) update state machine — see tst_qml_runner.cpp.
+add_executable(tst_qml_runner qml/tst_qml_runner.cpp
+    ${APP_SRC_DIR}/src/device/updatemodel.cpp
+    ${APP_SRC_DIR}/src/core/logging.cpp
+)
+target_include_directories(tst_qml_runner PRIVATE ${APP_SRC_DIR})
+target_link_libraries(tst_qml_runner PRIVATE Qt6::QuickTest Qt6::Qml Qt6::Network)
 add_test(NAME tst_qml_runner COMMAND tst_qml_runner -input ${CMAKE_CURRENT_SOURCE_DIR}/qml)
 set_tests_properties(tst_qml_runner PROPERTIES ENVIRONMENT "${DASH_TEST_ENV}")

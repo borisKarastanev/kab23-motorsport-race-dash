@@ -146,12 +146,16 @@ Item {
             }
 
             TextButton {
+                objectName: "installButton"
                 text: "INSTALL"
                 textColor: "#00cc44"
                 pressedColor: "#112211"
                 border.color: "#2a4a2a"
                 enabled: root.state === Updates.UpdateAvailable
-                onClicked: updateModel.startInstall()
+                // Gate on the power warning first — the update is a full
+                // multi-minute rebuild, and losing power mid-way is the
+                // likeliest way for it to fail in a car.
+                onClicked: installPowerConfirm.visible = true
             }
         }
 
@@ -291,6 +295,25 @@ Item {
         }
 
         Item { Layout.fillHeight: true }
+    }
+
+    ConfirmModal {
+        id: installPowerConfirm
+        objectName: "installPowerConfirm"
+        anchors.fill: parent
+        visible: false
+        title: "KEEP THE DASH POWERED"
+        message: "The update rebuilds the app and takes several minutes. "
+                 + "Keep the engine running or put the battery on a charger "
+                 + "before continuing. Losing power mid-update can leave the "
+                 + "dash unable to start."
+        confirmLabel: "OK"
+        cancelLabel: "CANCEL"
+        onCancelled: visible = false
+        onConfirmed: {
+            visible = false
+            updateModel.startInstall()
+        }
     }
 
     PasswordModal {

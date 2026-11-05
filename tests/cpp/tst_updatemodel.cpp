@@ -17,6 +17,10 @@ private slots:
     void checkForUpdatesMockUpToDate();
     void wrongPasswordThenCancel();
     void wrongPasswordThenCorrectPassword_fullInstallCycle();
+    void rollbackBeforeActivationKeepsPreviousVersion();
+    void rollbackDuringActivationWarnsPartialUpdate();
+    void rollbackReportsFailedCheckout();
+    void installShActivatesLast();
 };
 
 void TestUpdateModel::init()
@@ -186,6 +190,54 @@ void TestUpdateModel::wrongPasswordThenCorrectPassword_fullInstallCycle()
     QTRY_COMPARE_WITH_TIMEOUT(model.state(), UpdateModel::InstallSucceeded, 2000);
     QVERIFY(model.errorText().startsWith("Restart failed:"));
     qunsetenv("DASH_MOCK_UPDATE");
+}
+
+// ── rollback outcome ─────────────────────────────────────────────────
+// Regression guard: a failed update must only claim the previous version
+// survives when install.sh failed before touching what the next boot runs.
+
+void TestUpdateModel::rollbackBeforeActivationKeepsPreviousVersion()
+{
+    for (const QString &stage : { QString("Building application"), QString("Installing dependencies"),
+                                  QString() }) {
+        const auto r = UpdateModel::describeRollback(true, "abc123", "", stage);
+        QCOMPARE(r.logTrailer, QStringLiteral("rolled back to abc123"));
+        QVERIFY(r.errorSuffix.contains("previous app version stays installed"));
+    }
+}
+
+void TestUpdateModel::rollbackDuringActivationWarnsPartialUpdate()
+{
+    const auto r = UpdateModel::describeRollback(true, "abc123", "", UpdateModel::kActivationStage);
+    QVERIFY(r.logTrailer.contains("abc123"));
+    QVERIFY(r.logTrailer.contains(UpdateModel::kActivationStage));
+    QVERIFY(r.errorSuffix.contains("partially updated"));
+    QVERIFY(!r.errorSuffix.contains("stays installed"));
+}
+
+void TestUpdateModel::rollbackReportsFailedCheckout()
+{
+    const auto r = UpdateModel::describeRollback(
+        false, "abc123", "line1\nline2\nline3\nline4\nline5\nfatal: unable to checkout",
+        "Building application");
+    QVERIFY(r.logTrailer.startsWith("rollback to abc123 FAILED"));
+    QVERIFY(r.logTrailer.contains("fatal: unable to checkout"));
+    QVERIFY(!r.logTrailer.contains("line1")); // only the last 5 lines are kept
+    QVERIFY(r.errorSuffix.contains("ALSO FAILED"));
+}
+
+void TestUpdateModel::installShActivatesLast()
+{
+    // The real install.sh must activate the new build as its last step before
+    // "Done" (anything after it could fail with the new build already live),
+    // under the exact name describeRollback() keys off.
+    QFile realScript(DASH_INSTALL_SH);
+    QVERIFY(realScript.open(QIODevice::ReadOnly | QIODevice::Text));
+    const QStringList steps = UpdateModel::stageNames(QString::fromUtf8(realScript.readAll()));
+    QVERIFY(steps.size() >= 3);
+    QCOMPARE(steps.last(), QStringLiteral("Done"));
+    QCOMPARE(steps.at(steps.size() - 2), UpdateModel::kActivationStage);
+    QCOMPARE(steps.count(UpdateModel::kActivationStage), 1);
 }
 
 QTEST_GUILESS_MAIN(TestUpdateModel)

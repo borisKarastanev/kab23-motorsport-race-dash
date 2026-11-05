@@ -35,7 +35,8 @@ Environment=QT_LOGGING_RULES=qt.qpa.*=false
 # plymouth-quit(-wait) units so this service is the only thing that ever
 # dismisses the splash.
 ExecStartPre=-/usr/bin/plymouth deactivate
-ExecStart=@INSTALL_DIR@/build/bmw-e46-dash --kiosk
+# bin/, not a build tree — see install.sh's deploy helpers (DASH_BIN).
+ExecStart=@INSTALL_DIR@/bin/bmw-e46-dash --kiosk
 # Type=notify + the app's own sd_notify(READY=1) (sent after its first frame
 # is actually on screen — see main.cpp) is what makes ExecStartPost below
 # race-free: systemd only runs it once that signal arrives, so the boot

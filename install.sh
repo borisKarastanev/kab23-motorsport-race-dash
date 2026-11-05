@@ -22,6 +22,56 @@ step() {
     echo "=== $1 ==="
 }
 
+# --- deploy helpers (sourced by tests/sh/tst_install_promote.sh) ---
+# Build tree and deployed binary are deliberately separate. install.sh compiles
+# in a scratch tree it wipes first (BUILD_DIR); systemd runs DASH_BIN, which only
+# promote_binary() writes, and only in the final "Activating new build" step —
+# together with the unit it belongs to. A failed or power-interrupted update
+# therefore keeps booting the previous binary under its own unit. (Wiping the
+# tree the unit ran from is how a failed update once left the dash stuck on the
+# Plymouth splash with status=203/EXEC.) build/ is left to manual dev builds.
+BUILD_DIR="$REPO_DIR/build-install"
+BUILD_BIN="$BUILD_DIR/bmw-e46-dash"
+BIN_DIR="$REPO_DIR/bin"
+DASH_BIN="$BIN_DIR/bmw-e46-dash"
+
+# Atomically replace $DASH_BIN with $1. The copy is fsynced before the
+# rename(2), so a power cut leaves either the old or the new binary, never a
+# truncated one. Renaming over a running executable is ETXTBSY-safe: the
+# running dashboard keeps its old inode until it exits. The previous binary is
+# kept as bmw-e46-dash.prev for manual recovery.
+promote_binary() {
+    local src="$1" tmp="$BIN_DIR/.bmw-e46-dash.new"
+    local group
+    group=$(id -gn "$DASHBOARD_USER")
+    # Every step returns on failure explicitly rather than relying on the
+    # caller's `set -e`, which bash silently disables inside if/&&/|| contexts —
+    # a failed copy must never fall through to touching .prev or the live binary.
+    [ -f "$src" ] && [ -x "$src" ] || { echo "promote_binary: $src is not an executable file" >&2; return 1; }
+    # Re-running the same build must not clobber .prev with an identical copy —
+    # but still repair owner/mode, e.g. after a manual copy as root.
+    if cmp -s "$src" "$DASH_BIN"; then
+        chown "$DASHBOARD_USER:$group" "$DASH_BIN" && chmod 755 "$DASH_BIN" || return 1
+        return 0
+    fi
+    install -d -m 755 -o "$DASHBOARD_USER" -g "$group" "$BIN_DIR" || return 1
+    install -m 755 -o "$DASHBOARD_USER" -g "$group" "$src" "$tmp" || return 1
+    sync "$tmp" || return 1
+    if [ -f "$DASH_BIN" ]; then
+        ln -f "$DASH_BIN" "$DASH_BIN.prev" || return 1
+    fi
+    mv -f "$tmp" "$DASH_BIN" || return 1
+    sync "$BIN_DIR" || true  # durability nicety; the rename already happened
+}
+
+install_dash_service() {
+    sed "s|@INSTALL_DIR@|$REPO_DIR|g; s|@DASHBOARD_USER@|$DASHBOARD_USER|g" \
+        "$REPO_DIR/systemd/$DASH_SERVICE" \
+        | sudo tee /etc/systemd/system/$DASH_SERVICE > /dev/null
+    sudo systemctl daemon-reload
+}
+# --- end deploy helpers ---
+
 step "Installing dependencies"
 # On libqt6sql6-sqlite specifically: the Qt SQL *headers* ship with
 # qt6-base-dev, but Debian packages the SQLite driver *plugin* separately. Miss
@@ -62,8 +112,8 @@ step "Migrating legacy user data out of build/"
 # src/core/apppaths.h) that no build step ever touches. Earlier versions stored it
 # next to the binary — QCoreApplication::applicationDirPath() resolves to
 # build/ — so a device updating from such a version still has irreplaceable race
-# data sitting inside build/ that the wipe below would destroy. Move it into the
-# stable directory ONCE, before the wipe.
+# data sitting inside build/, a dev/build directory nothing guarantees to keep.
+# Move it into the stable directory ONCE.
 #
 # LEGACY_DATA_FILES is a fixed historical list on purpose: only pre-migration
 # versions ever wrote to build/, so this set can never grow. Any file added in
@@ -105,21 +155,18 @@ if [ -f "$REPO_DIR/data/track-db.json" ]; then
 fi
 
 step "Building application"
-# Wipe the build directory rather than reusing it: CMake's Unix Makefiles
+# Wipe the build directory (BUILD_DIR — never the tree the running unit uses,
+# see the deploy helpers above) rather than reusing it: CMake's Unix Makefiles
 # generator regenerates shared per-target bookkeeping on any CMakeLists.txt
 # edit, so an incremental build here has previously linked in stale
 # generated resource/object files from a prior build-system config (e.g.
 # the qt_add_qml_module revert) alongside the current source, producing a
 # binary with mismatched/duplicate QML resource paths that crashes at
 # startup. ccache (below) makes a full rebuild cheap, so there's no
-# incremental-build fragility left to trade for the risk. User data no longer
-# lives here (see the migration step above), so the wipe is non-destructive.
-# Removing (not just unlinking the binary) is still ETXTBSY-safe if this
-# runs as an in-app update while the dashboard is running: the running
-# process keeps its inode open until it exits, same as a plain rm -f would.
-rm -rf "$REPO_DIR/build"
-mkdir -p "$REPO_DIR/build"
-chown -R "$DASHBOARD_USER:$DASHBOARD_USER" "$REPO_DIR/build"
+# incremental-build fragility left to trade for the risk.
+rm -rf "$BUILD_DIR"
+mkdir -p "$BUILD_DIR"
+chown -R "$DASHBOARD_USER:$DASHBOARD_USER" "$BUILD_DIR"
 # Size parallelism by free memory, not core count: a Qt Quick translation unit
 # takes ~300-500 MB in cc1plus, the dashboard keeps running during an in-app
 # update, and swap is disabled (see "Trimming boot-irrelevant units"). On a
@@ -146,7 +193,7 @@ fi
 # Run cmake and make as the repo owner — Qt cmake macros write into the source
 # tree via configure_file, which fails when running as root.
 sudo -u "$DASHBOARD_USER" env CCACHE_DIR="$CCACHE_DIR" \
-    bash -c "cd '$REPO_DIR/build' && cmake .. -DCMAKE_BUILD_TYPE=Release && make -j$JOBS"
+    bash -c "cd '$BUILD_DIR' && cmake .. -DCMAKE_BUILD_TYPE=Release && make -j$JOBS"
 if command -v ccache > /dev/null; then
     CCACHE_STATS=$(sudo -u "$DASHBOARD_USER" env CCACHE_DIR="$CCACHE_DIR" ccache --print-stats 2> /dev/null \
         | awk -F'\t' '$1 == "direct_cache_hit" || $1 == "preprocessed_cache_hit" { h += $2; seen = 1 }
@@ -272,13 +319,6 @@ sudo systemctl daemon-reload
 sudo systemctl enable "$CAN_SERVICE"
 # Note: 'non-existent unit dev-ttyACM0.device' warning above is expected —
 # that unit is created by udev only when the USB2CAN adapter is plugged in.
-
-step "Installing dashboard system service (console/eglfs mode)"
-sed "s|@INSTALL_DIR@|$REPO_DIR|g; s|@DASHBOARD_USER@|$DASHBOARD_USER|g" \
-    "$REPO_DIR/systemd/$DASH_SERVICE" \
-    | sudo tee /etc/systemd/system/$DASH_SERVICE > /dev/null
-sudo systemctl daemon-reload
-sudo systemctl enable "$DASH_SERVICE"
 
 step "Configuring clean console boot (kiosk display)"
 # The dashboard drives the DSI panel directly through Qt eglfs (bare KMS), so it
@@ -441,10 +481,22 @@ cat > "$AUTOSTART_DIR/bmw-e46-dash.desktop" << EOF
 [Desktop Entry]
 Type=Application
 Name=BMW E46 Race Dashboard
-Exec=$REPO_DIR/build/bmw-e46-dash --kiosk
+Exec=$DASH_BIN --kiosk
 EOF
 chown -R "$DASHBOARD_USER:$DASHBOARD_USER" "$AUTOSTART_DIR"
 echo "Autostart file: $AUTOSTART_DIR/bmw-e46-dash.desktop"
+
+step "Activating new build"
+# Deliberately the LAST step (UpdateModel keys its rollback message off this
+# stage name): every earlier step has succeeded, so only now do the binary the
+# next boot runs and its systemd unit (console/eglfs mode) change — together,
+# so a failed update never boots the old binary under the new unit or vice
+# versa. On a device still on the old build/ layout, the old unit keeps running
+# the untouched build/bmw-e46-dash until install_dash_service repoints it here.
+promote_binary "$BUILD_BIN"
+install_dash_service
+sudo systemctl enable "$DASH_SERVICE"
+echo "    (activated $DASH_BIN and its systemd unit)"
 
 echo ""
 step "Done"
@@ -458,7 +510,7 @@ echo ""
 echo "*** A REBOOT is required for the boot-display changes to take effect. ***"
 echo ""
 echo "To start manually now:"
-echo "  $REPO_DIR/build/bmw-e46-dash --kiosk"
+echo "  $DASH_BIN --kiosk"
 echo ""
 echo "To view dashboard logs (persisted across reboots):"
 echo "  journalctl -u bmw-e46-dash"

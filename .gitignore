@@ -4,6 +4,9 @@ CLAUDE.md
 
 # Build
 build/
+# install.sh's build tree and deployed binary (see its deploy helpers)
+build-install/
+bin/
 CMakeCache.txt
 CMakeFiles/
 cmake_install.cmake
