@@ -61,12 +61,28 @@ public:
     // (no file I/O) so it's directly unit-testable; countInstallStages() below
     // is the file-reading wrapper actually used at runtime.
     static int countStageMarkers(const QString &scriptText);
+    // The names of those step "..." calls, in order.
+    static QStringList stageNames(const QString &scriptText);
+    // install.sh's final stage — the only one that touches what the next boot
+    // runs (binary + systemd unit).
+    static inline const QString kActivationStage = QStringLiteral("Activating new build");
     // True for install.sh's summary lines (per-step timings, build jobs,
     // ccache stats, total time) — the ones copied into the Device Log.
     static bool isInstallSummaryLine(const QString &line);
     // Appends `chunk` to `buffer` and removes and returns the complete lines
     // (trailing '\r' stripped); an unterminated tail stays in `buffer`.
     static QStringList takeCompleteLines(QString &buffer, const QString &chunk);
+
+    // What a failed install's rollback reports: the update.log trailer and the
+    // suffix appended to errorText. `failedStage` is the install.sh stage that
+    // was running when it failed. Static so it's testable without git.
+    struct RollbackOutcome {
+        QString logTrailer;
+        QString errorSuffix;
+    };
+    static RollbackOutcome describeRollback(bool checkoutOk, const QString &ref,
+                                            const QString &checkoutOutput,
+                                            const QString &failedStage);
 
     Q_INVOKABLE void checkConnection();
     Q_INVOKABLE void checkForUpdates();

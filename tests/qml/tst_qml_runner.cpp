@@ -2,6 +2,9 @@
 #include <QQmlEngine>
 #include <QQmlContext>
 #include <QObject>
+#include <QtQml/qqml.h>
+
+#include "src/device/updatemodel.h"
 
 // Stand-in for the real DisplayModel context property: DisplaySettings.qml
 // reads `displayModel` as a bare context property, same as every other model
@@ -35,9 +38,21 @@ private:
 class Setup : public QObject {
     Q_OBJECT
 public slots:
+    void applicationAvailable()
+    {
+        // Same registration as main.cpp, so `import RaceDash 1.0` and the
+        // Updates.* enum resolve in AppVersionDetail.qml.
+        qmlRegisterUncreatableMetaObject(UpdateModel::staticMetaObject, "RaceDash", 1, 0,
+                                         "Updates", "Enum access only");
+    }
+
     void qmlEngineAvailable(QQmlEngine *engine)
     {
         engine->rootContext()->setContextProperty("displayModel", new MockDisplayModel(engine));
+        // The real model in mock mode: its timers drive the same state
+        // transitions the app shows, without git/sudo/network.
+        engine->rootContext()->setContextProperty("updateModel",
+                                                  new UpdateModel(/*mockMode=*/true, engine));
     }
 };
 
