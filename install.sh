@@ -469,6 +469,34 @@ sudo systemctl disable --now apt-daily.timer apt-daily-upgrade.timer man-db.time
 sudo systemctl disable --now ModemManager.service triggerhappy.service 2>/dev/null || true
 sudo systemctl disable --now dphys-swapfile.service rpi-eeprom-update.service 2>/dev/null || true
 
+step "Display orientation (optional)"
+# Panels that are natively portrait (e.g. the Raspberry Pi Touch Display 2,
+# 720x1280) need rotating to landscape. Opt in with DASH_ROTATION=90|180|270
+# (e.g. `DASH_ROTATION=90 ./install.sh`), clockwise. The app rotates its own
+# Qt Quick scene (QT_QPA_EGLFS_ROTATION would not: it only affects QWidget
+# raster content). Written as a systemd drop-in, which
+# survives later updates: install_dash_service only rewrites the main unit, and
+# in-app updates run this script without the variable, which leaves an existing
+# drop-in untouched. DASH_ROTATION=0 removes it.
+ROT_DROPIN_DIR=/etc/systemd/system/$DASH_SERVICE.d
+ROT_DROPIN="$ROT_DROPIN_DIR/display.conf"
+case "${DASH_ROTATION:-}" in
+    90|180|270)
+        sudo mkdir -p "$ROT_DROPIN_DIR"
+        printf '[Service]\nEnvironment=DASH_ROTATION=%s\n' "$DASH_ROTATION" \
+            | sudo tee "$ROT_DROPIN" > /dev/null
+        sudo systemctl daemon-reload
+        echo "    (rotation $DASH_ROTATION written to $ROT_DROPIN)" ;;
+    0)
+        sudo rm -f "$ROT_DROPIN"
+        sudo systemctl daemon-reload
+        echo "    (rotation drop-in removed)" ;;
+    "")
+        echo "    (DASH_ROTATION not set — leaving display orientation unchanged)" ;;
+    *)
+        echo "WARNING: DASH_ROTATION must be 0, 90, 180 or 270 (got '$DASH_ROTATION') — ignored." ;;
+esac
+
 step "Installing XDG autostart (desktop/Wayland/X11 mode)"
 # NOTE: console boot is enforced above, so this desktop-session autostart is
 # inert on a normally-provisioned device. It only takes effect if someone later

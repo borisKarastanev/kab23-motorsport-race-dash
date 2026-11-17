@@ -184,6 +184,20 @@ int main(int argc, char *argv[])
     engine.rootContext()->setContextProperty("uplinkModel",     &uplinkModel);
     engine.rootContext()->setContextProperty("cloudConfig",     &cloudConfig);
     engine.rootContext()->setContextProperty("kioskMode",       kioskMode);
+    // Clockwise rotation of the whole UI, for panels that are natively portrait
+    // (e.g. the 720x1280 Raspberry Pi Touch Display 2). Set via DASH_ROTATION in
+    // the service's display.conf drop-in (install.sh). Done in the QML scene,
+    // not via QT_QPA_EGLFS_ROTATION, which only rotates software-rendered
+    // QWidget content and is ignored for Qt Quick; rotating the scene also
+    // remaps touch input for free.
+    int displayRotation = qEnvironmentVariableIntValue("DASH_ROTATION");
+    if (displayRotation != 0 && displayRotation != 90
+        && displayRotation != 180 && displayRotation != 270) {
+        qWarning() << "Ignoring invalid DASH_ROTATION" << displayRotation
+                   << "(expected 0, 90, 180 or 270)";
+        displayRotation = 0;
+    }
+    engine.rootContext()->setContextProperty("displayRotation", displayRotation);
     engine.load(QUrl(QStringLiteral("qrc:/qml/main.qml")));
 
     if (engine.rootObjects().isEmpty())
