@@ -82,8 +82,12 @@ step "Installing dependencies"
 # to locate libmosquitto, and none of the packages below hard-depend on it. A
 # fresh Pi OS Lite image without it fails at `cmake` — during an on-device
 # update, i.e. after git checkout has already moved the working tree to the new
-# tag. CI never catches this because GitHub's runner image ships it.
+# tag. CI never catches this because GitHub's runner image ships it. The same goes
+# for cmake and the compiler toolchain (build-essential): a fresh Pi OS image
+# has neither, and the build step fails with "cmake: command not found".
 sudo apt install -y \
+    build-essential \
+    cmake \
     pkg-config \
     qt6-base-dev \
     qt6-declarative-dev \
