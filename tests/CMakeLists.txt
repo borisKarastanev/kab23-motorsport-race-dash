@@ -26,6 +26,17 @@ target_link_libraries(tst_candatamodel PRIVATE Qt6::Test Qt6::SerialBus)
 add_test(NAME tst_candatamodel COMMAND tst_candatamodel)
 set_tests_properties(tst_candatamodel PROPERTIES ENVIRONMENT "${DASH_TEST_ENV}")
 
+# ── powermodel: idle auto-shutdown with the engine off (mock poweroff) ─
+add_executable(tst_powermodel cpp/tst_powermodel.cpp
+    ${APP_SRC_DIR}/src/device/powermodel.cpp
+    ${APP_SRC_DIR}/src/can/candatamodel.cpp
+    ${APP_SRC_DIR}/src/core/logging.cpp
+)
+target_include_directories(tst_powermodel PRIVATE ${APP_SRC_DIR})
+target_link_libraries(tst_powermodel PRIVATE Qt6::Test Qt6::Gui Qt6::SerialBus)
+add_test(NAME tst_powermodel COMMAND tst_powermodel)
+set_tests_properties(tst_powermodel PROPERTIES ENVIRONMENT "${DASH_TEST_ENV}")
+
 # ── raceboxmodel: haversine + lap timing via onData() sequences ───────
 add_executable(tst_raceboxmodel cpp/tst_raceboxmodel.cpp
     ${APP_SRC_DIR}/src/race/raceboxmodel.cpp

@@ -43,6 +43,10 @@ private slots:
     void oilPressureWarningExpiresWhenDme4Stale();
     void oilPressureWarningClearsWhenRpmStale();
     void shortDme4FrameStillDecodesOilTemp();
+    void engineRunningFromDme2Bit();
+    void engineRunningFromRpmWithoutBit();
+    void engineStopDebounced();
+    void engineStoppedWhenBusSilent();
     void absFaultIgnoresKeyOnBulbCheck();
     void absFaultShowsAfterDebounceAndExpires();
     void absFaultWaitsForCarToRoll();
@@ -473,6 +477,59 @@ void TestCanDataModel::oilPressureWarningClearsWhenRpmStale()
     // 0x316 goes quiet — a stale rpm can't vouch for a running engine.
     QVERIFY(feedUntil(model, {CanFrames::dme4(90.0, true)}, CanDataModel::kInputStaleMs + kSettleMs,
                       [&] { return !model.oilPressureWarning(); }));
+}
+
+// Idle engine with both signals saying so; true once engineRunning is up.
+static bool startEngine(CanDataModel &model)
+{
+    return feedUntil(model, {CanFrames::rpm(900), CanFrames::dme2(80.0, 0.0, true)}, 500,
+                     [&] { return model.engineRunning(); });
+}
+
+void TestCanDataModel::engineRunningFromDme2Bit()
+{
+    CanDataModel model;
+    QSignalSpy spy(&model, &CanDataModel::engineRunningChanged);
+    QVERIFY(!model.engineRunning());
+
+    // Bit alone (rpm frame absent) is enough; turns on without a debounce.
+    QVERIFY(feedUntil(model, {CanFrames::dme2(80.0, 0.0, true)}, 500,
+                      [&] { return model.engineRunning(); }));
+    QCOMPARE(spy.count(), 1);
+}
+
+void TestCanDataModel::engineRunningFromRpmWithoutBit()
+{
+    CanDataModel model;
+    // Bit clear but the engine is clearly turning — trust the rpm.
+    QVERIFY(feedUntil(model, {CanFrames::rpm(900), CanFrames::dme2(80.0, 0.0, false)}, 500,
+                      [&] { return model.engineRunning(); }));
+    QVERIFY(!feedUntil(model, {CanFrames::rpm(900), CanFrames::dme2(80.0, 0.0, false)},
+                       CanDataModel::kEngineStopDebounceMs + 300,
+                       [&] { return !model.engineRunning(); }));
+}
+
+void TestCanDataModel::engineStopDebounced()
+{
+    CanDataModel model;
+    QVERIFY(startEngine(model));
+
+    const QList<QCanBusFrame> stopped{CanFrames::rpm(0), CanFrames::dme2(80.0, 0.0, false)};
+    const auto isStopped = [&] { return !model.engineRunning(); };
+    // A stall shorter than the debounce doesn't register...
+    QVERIFY(!feedUntil(model, stopped, CanDataModel::kEngineStopDebounceMs / 2, isStopped));
+    // ...a stop that holds does.
+    QVERIFY(feedUntil(model, stopped, CanDataModel::kEngineStopDebounceMs + 500, isStopped));
+}
+
+void TestCanDataModel::engineStoppedWhenBusSilent()
+{
+    CanDataModel model;
+    QVERIFY(startEngine(model));
+
+    // Key back to position 1: the DME powers down and both frames stop.
+    QVERIFY(QTest::qWaitFor([&] { return !model.engineRunning(); },
+                            CanDataModel::kInputStaleMs + CanDataModel::kEngineStopDebounceMs + 500));
 }
 
 void TestCanDataModel::shortDme4FrameStillDecodesOilTemp()

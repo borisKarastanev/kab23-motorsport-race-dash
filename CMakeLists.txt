@@ -70,6 +70,7 @@ add_executable(bmw-e46-dash
     src/device/networkmodel.cpp
     src/device/timemodel.cpp
     src/device/sdnotify.cpp
+    src/device/powermodel.cpp
     src/cloud/icloudclient.h
     src/cloud/cloudconfig.cpp
     src/cloud/uplinkspool.cpp

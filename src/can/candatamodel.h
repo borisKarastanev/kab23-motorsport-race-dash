@@ -58,6 +58,12 @@ class CanDataModel : public QObject {
     Q_PROPERTY(double throttle READ throttle NOTIFY throttleChanged)
     Q_PROPERTY(bool throttleValid READ throttleValid NOTIFY throttleChanged)
     Q_PROPERTY(int gear READ gear NOTIFY gearChanged)
+    // Engine running: the DME2 (0x329) LV_ERU_CAN bit, or a fresh rpm above
+    // kOilPressureMinRpm as a fallback in case the bit is wrong or absent.
+    // Turns on at once; turns off only after kEngineStopDebounceMs of neither,
+    // so a stall-and-restart or a dropped frame doesn't flicker it. A silent
+    // bus (key back to position 1 powers the DME down) reads as stopped.
+    Q_PROPERTY(bool engineRunning READ engineRunning NOTIFY engineRunningChanged)
 
 public:
     explicit CanDataModel(QObject *parent = nullptr);
@@ -82,6 +88,7 @@ public:
     double throttle()      const { return m_throttle.value; }
     bool   throttleValid() const { return m_throttle.valid; }
     int    gear()        const { return m_gear; }
+    bool   engineRunning() const { return m_engineRunning.state; }
 
     // A wheel-speed reading older than this no longer drives speed — the GPS
     // fallback takes over so a dead ABS can't freeze the gauge at its last value.
@@ -95,6 +102,8 @@ public:
     // How long "low pressure while running" must hold before the warning shows
     // (and how long it must be gone before the warning clears).
     static constexpr qint64 kOilPressureDebounceMs = 1000;
+    // How long the engine must read as stopped before engineRunning drops.
+    static constexpr qint64 kEngineStopDebounceMs = 3000;
     // ABS-active: brake on and a wheel kAbsSlipRatio behind the fastest, for
     // kAbsSlipFrames frames, held kAbsHoldMs. Cornering spreads the wheels
     // too, but at ~1 g the inside-rear/outside-front gap reaches 20 % only
@@ -111,9 +120,10 @@ public:
     // move), then must hold longer than the ~2 s key-on bulb check.
     static constexpr qint64 kAbsFaultDebounceMs = 3000;
     static constexpr double kAbsFaultMinSpeedKmh = 10.0;
-    // Device Log lines for ASC1 bits 5-7 per run — enough to see whether a bit
-    // tracks ABS, without flooding the log if one toggles every brake zone.
-    static constexpr int    kAsc1StatusLogLimit = 20;
+    // Device Log lines per run for each unverified bit logged on change (ASC1
+    // bits 5-7, DME2 LV_ERU_CAN) — enough to see whether a bit tracks what it
+    // should, without flooding the log if one toggles every brake zone.
+    static constexpr int    kBitChangeLogLimit = 20;
 
 public slots:
     void onFrame(const QCanBusFrame &frame);
@@ -134,6 +144,7 @@ signals:
     void brakePressedChanged();
     void throttleChanged();
     void gearChanged();
+    void engineRunningChanged();
 
 private slots:
     void emitNotifications();
@@ -153,6 +164,7 @@ private:
     static constexpr quint16 kDirtyOilPressure = 0x800;
     static constexpr quint16 kDirtyAbsActive   = 0x1000;
     static constexpr quint16 kDirtyAbsFault    = 0x2000;
+    static constexpr quint16 kDirtyEngineRunning = 0x4000;
 
     enum Wheel { FL, FR, RL, RR }; // matches the 0x1F0 field order
 
@@ -168,6 +180,14 @@ private:
         // even before the next notify tick's expireInput() catches up. For
         // per-frame readers that mustn't act on a latched value.
         T live() const { return fresh(clock, kInputStaleMs) ? value : T{}; }
+    };
+
+    // Logs a raw value each time it changes, at most kBitChangeLogLimit lines
+    // per run, then a single "further changes not logged" line.
+    struct ChangeLog {
+        int last = -1; // last logged value; -1 = none yet
+        int count = 0; // lines written
+        bool shouldLog(int value, const char *tag); // true: caller logs the change
     };
 
     // A flag that follows its raw input only once the input has held the new
@@ -187,7 +207,8 @@ private:
     int  vehicleSpeedFromWheels() const;
     void applySpeed(int kmh);
     void updateSpeedSource();
-    bool engineRunning() const;
+    bool rpmRunning() const;
+    void updateEngineRunning();
     void updateOilPressureWarning();
     bool wheelsSlipping() const;
     void updateAbsActive();
@@ -196,6 +217,7 @@ private:
     void updateImplausibleWheels();
     void updateAbsFromWheels();
     void logAsc1StatusBits(quint8 byte0);
+    void logEngineRunningBit(bool bit);
 
     int    m_rpm         = 0;
     QElapsedTimer m_rpmClock;    // restarted on every 0x316; invalid until the first
@@ -212,6 +234,9 @@ private:
     Input<double> m_throttle;
     Input<bool>   m_oilPressureLow; // raw 0x545 bit, fresh-gated like the inputs
     Debounced m_oilPressureWarning;
+    Input<bool>   m_engineRunningBit; // raw 0x329 LV_ERU_CAN, fresh-gated like the inputs
+    Debounced m_engineRunning;
+    ChangeLog m_engineBitLog;
     bool   m_dme4ShortWarned = false;
     Input<bool>   m_absLampRaw;      // raw LV_ABS_LED, fresh-gated like the inputs
     Debounced m_absFault;
@@ -220,8 +245,7 @@ private:
     QElapsedTimer m_absLastSlip;     // restarted on every slipping 0x1F0 frame
     std::array<bool, 4> m_wheelImplausible{}; // read kAbsSlipRatio low while rolling unbraked
     bool   m_hasRolled = false;      // wheels have passed kAbsFaultMinSpeedKmh this run
-    int    m_asc1StatusBits = -1;    // last logged byte 0 bits 5-7; -1 = none yet
-    int    m_asc1StatusLogged = 0;   // lines written, capped at kAsc1StatusLogLimit
+    ChangeLog m_asc1StatusLog;       // byte 0 bits 5-7
     QElapsedTimer m_wheelSpeedClock; // restarted on every 0x1F0; invalid until the first
     int    m_gear        = 0;
 

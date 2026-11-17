@@ -53,6 +53,12 @@ inline quint8 encodeThrottle(double pct)
     return static_cast<quint8>(raw);
 }
 
+// 0x329 byte 3 bit 3: LV_ERU_CAN, engine running (1) / stopped (0).
+// Assumed from the MS43 DME2 spec, not yet seen on the car — verify against
+// candump (key on, engine off: bit clear; set once the engine catches).
+constexpr int    kOffsetDme2Status = 3;
+constexpr quint8 kEngineRunningBit = 0x08;
+
 // 0x545 oil temp: byte - 48 °C  (TOIL_CAN, DME4 spec — different formula from coolant)
 constexpr double kOilTempOffset = 48.0;
 inline quint8  encodeOilTemp(double c)     { return static_cast<quint8>(c + kOilTempOffset); }

@@ -23,11 +23,13 @@ inline QCanBusFrame coolant(double celsius)
     return QCanBusFrame(CanScaling::kFrameTemp, payload);
 }
 
-// DME2: coolant plus accelerator pedal.
-inline QCanBusFrame dme2(double celsius, double throttlePct)
+// DME2: coolant, accelerator pedal and the engine-running bit.
+inline QCanBusFrame dme2(double celsius, double throttlePct, bool engineRunning = true)
 {
     QByteArray payload = coolant(celsius).payload();
     payload[CanScaling::kOffsetThrottle] = static_cast<char>(CanScaling::encodeThrottle(throttlePct));
+    if (engineRunning)
+        payload[CanScaling::kOffsetDme2Status] = static_cast<char>(CanScaling::kEngineRunningBit);
     return QCanBusFrame(CanScaling::kFrameTemp, payload);
 }
 

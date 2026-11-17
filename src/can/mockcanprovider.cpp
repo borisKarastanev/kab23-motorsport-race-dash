@@ -22,6 +22,7 @@ MockCanProvider::MockCanProvider(QObject *parent)
     : ICanProvider(parent)
     , m_oilPressureLow(qEnvironmentVariableIsSet("MOCK_OIL_PRESSURE_LOW"))
     , m_absFault(qEnvironmentVariableIsSet("MOCK_ABS_FAULT"))
+    , m_engineStopped(qEnvironmentVariableIsSet("MOCK_ENGINE_STOPPED"))
 {
     m_timer.setInterval(20); // 50 Hz
     connect(&m_timer, &QTimer::timeout, this, &MockCanProvider::onTick);
@@ -36,15 +37,19 @@ void MockCanProvider::onTick()
 
     // RPM: sine wave between idle and redline over the cycle period
     const double phase = (static_cast<double>(m_tick % CYCLE_TICKS) / CYCLE_TICKS) * 2.0 * M_PI;
-    const int rpm = IDLE_RPM + static_cast<int>((SHIFT_RPM - IDLE_RPM) * 0.5 * (1.0 - std::cos(phase)));
+    // MOCK_ENGINE_STOPPED: key on, engine off — 0 rpm, standing still, the
+    // DME2 engine-running bit clear. Previews the idle auto-shutdown.
+    const int rpm = m_engineStopped
+        ? 0
+        : IDLE_RPM + static_cast<int>((SHIFT_RPM - IDLE_RPM) * 0.5 * (1.0 - std::cos(phase)));
 
     const double coolantProgress = std::min(static_cast<double>(m_tick) / COOLANT_RAMP_TICKS, 1.0);
     const double oilProgress     = std::min(static_cast<double>(m_tick) / OIL_RAMP_TICKS,     1.0);
 
     emit frameReady(CanFrames::rpm(rpm));
     // Throttle: on while revs climb (first half of the cycle), off while they fall.
-    const double throttle = std::max(0.0, 100.0 * std::sin(phase));
-    emit frameReady(CanFrames::dme2(20.0 + coolantProgress * 70.0, throttle));
+    const double throttle = m_engineStopped ? 0.0 : std::max(0.0, 100.0 * std::sin(phase));
+    emit frameReady(CanFrames::dme2(20.0 + coolantProgress * 70.0, throttle, !m_engineStopped));
     emit frameReady(CanFrames::dme4(20.0 + oilProgress * 90.0, m_oilPressureLow));
 
     // Wheel speeds track RPM; rears read ~2% high to mimic driven-wheel slip.

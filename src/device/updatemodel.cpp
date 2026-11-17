@@ -499,7 +499,7 @@ void UpdateModel::onRebootFailed(const QString &output)
 
 void UpdateModel::reset()
 {
-    if (m_state == Installing || m_state == Rebooting)
+    if (busy())
         return;
 
     zeroPassword();

@@ -240,7 +240,7 @@ RULES
 # The Pi has no RTC; reading it as local time makes every DST/zone change wrong.
 sudo timedatectl set-local-rtc 0 || true
 
-step "Enabling reboot for the dashboard user"
+step "Enabling reboot and poweroff for the dashboard user"
 # The update screen's RESTART NOW runs `systemctl reboot` as the dashboard
 # user, no sudo (see UpdateModel::requestReboot). It used to pipe the update
 # password to `sudo reboot`, but that password is wiped when install.sh
@@ -248,13 +248,18 @@ step "Enabling reboot for the dashboard user"
 # outlived it and RESTART NOW silently did nothing. Same "no active logind
 # session" gap as the NetworkManager rule above. Matched on the user rather
 # than netdev: rebooting is more privileged than nmcli. Unquoted heredoc so
-# $DASHBOARD_USER expands.
+# $DASHBOARD_USER expands. The power-off actions are for the idle auto-shutdown
+# with the engine off (see PowerModel), which runs `systemctl poweroff` the
+# same way so the SD card isn't cut off mid-write by the ignition.
 sudo mkdir -p /etc/polkit-1/rules.d
 sudo tee /etc/polkit-1/rules.d/50-race-dash-reboot.rules > /dev/null << RULES
 polkit.addRule(function(action, subject) {
     if ((action.id === "org.freedesktop.login1.reboot" ||
          action.id === "org.freedesktop.login1.reboot-multiple-sessions" ||
-         action.id === "org.freedesktop.login1.reboot-ignore-inhibit") &&
+         action.id === "org.freedesktop.login1.reboot-ignore-inhibit" ||
+         action.id === "org.freedesktop.login1.power-off" ||
+         action.id === "org.freedesktop.login1.power-off-multiple-sessions" ||
+         action.id === "org.freedesktop.login1.power-off-ignore-inhibit") &&
         subject.user === "$DASHBOARD_USER") {
         return polkit.Result.YES;
     }

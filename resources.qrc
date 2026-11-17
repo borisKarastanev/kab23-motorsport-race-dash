@@ -3,6 +3,7 @@
     <qresource prefix="/">
         <file>qml/TimeFormat.js</file>
         <file>qml/main.qml</file>
+        <file>qml/ShutdownCountdown.qml</file>
         <file>qml/DashboardView.qml</file>
         <file>qml/SettingsView.qml</file>
         <file>qml/SettingsMenu.qml</file>

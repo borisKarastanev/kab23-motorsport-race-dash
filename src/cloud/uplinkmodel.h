@@ -93,6 +93,11 @@ public:
     // how most of them do end.
     void shutdown();
 
+    // Undoes shutdown() when the process turns out not to be exiting after all
+    // (PowerModel's poweroff failed): reconnects with the current config. A new
+    // session opens on the next lap-timer start, as usual. No-op before start().
+    void resume();
+
     // Test seam — production uses AppPaths.
     void setSpoolPath(const QString &path) { m_spool.setDatabasePath(path); }
 

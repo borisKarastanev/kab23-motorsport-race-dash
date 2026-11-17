@@ -23,6 +23,7 @@
 #include "src/device/updatemodel.h"
 #include "src/device/networkmodel.h"
 #include "src/device/timemodel.h"
+#include "src/device/powermodel.h"
 #include "src/cloud/cloudconfig.h"
 #include "src/cloud/mosquittocloudclient.h"
 #include "src/cloud/uplinkmodel.h"
@@ -169,6 +170,22 @@ int main(int argc, char *argv[])
     QObject::connect(&raceBoxModel, &RaceBoxModel::lapCompleted,
                      &uplinkModel, &UplinkModel::onLapCompleted);
 
+    // Idle auto-shutdown with the engine off (see PowerModel). The session and
+    // the uplink's `stop` are flushed synchronously on the way down: a
+    // poweroff SIGTERMs the service, and aboutToQuit never fires on SIGTERM.
+    PowerModel powerModel(&dataModel, useMock);
+    QObject::connect(&updateModel, &UpdateModel::stateChanged, &powerModel,
+                     [&updateModel, &powerModel] { powerModel.setBlocked(updateModel.busy()); });
+    // saveCurrentSession() is a no-op without laps.
+    QObject::connect(&powerModel, &PowerModel::aboutToPowerOff,
+                     &sessionModel, &SessionModel::saveCurrentSession);
+    QObject::connect(&powerModel, &PowerModel::aboutToPowerOff,
+                     &uplinkModel, &UplinkModel::shutdown);
+    // The poweroff failed (or mock mode): the dash keeps running, so the
+    // uplink must too. The saved session stays saved.
+    QObject::connect(&powerModel, &PowerModel::powerOffAborted,
+                     &uplinkModel, &UplinkModel::resume);
+
     QQmlApplicationEngine engine;
     engine.rootContext()->setContextProperty("dashConfig",       &dashConfig);
     engine.rootContext()->setContextProperty("dataModel",       &dataModel);
@@ -183,6 +200,7 @@ int main(int argc, char *argv[])
     engine.rootContext()->setContextProperty("logBuffer",       &logBuffer);
     engine.rootContext()->setContextProperty("uplinkModel",     &uplinkModel);
     engine.rootContext()->setContextProperty("cloudConfig",     &cloudConfig);
+    engine.rootContext()->setContextProperty("powerModel",      &powerModel);
     engine.rootContext()->setContextProperty("kioskMode",       kioskMode);
     engine.load(QUrl(QStringLiteral("qrc:/qml/main.qml")));
 
@@ -229,6 +247,8 @@ int main(int argc, char *argv[])
                      &uplinkModel, [&uplinkModel] { uplinkModel.shutdown(); });
 
     if (auto *window = qobject_cast<QQuickWindow *>(engine.rootObjects().constFirst())) {
+        // Touches on the dashboard window are what count as "someone's here".
+        powerModel.setInputSource(window);
         QObject::connect(window, &QQuickWindow::frameSwapped, window,
                           &sdNotifyReady, Qt::SingleShotConnection);
         QObject::connect(window, &QQuickWindow::frameSwapped, &uplinkModel,

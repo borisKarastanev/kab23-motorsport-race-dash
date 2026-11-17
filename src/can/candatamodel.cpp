@@ -50,6 +50,11 @@ void CanDataModel::onFrame(const QCanBusFrame &frame)
             updateInput(m_throttle, CanScaling::decodeThrottle(raw),
                         CanScaling::throttleRawValid(raw), kDirtyThrottle);
         }
+        if (p.size() >= CanScaling::kOffsetDme2Status + 1) {
+            const bool running = static_cast<quint8>(p[CanScaling::kOffsetDme2Status]) & CanScaling::kEngineRunningBit;
+            updateInput(m_engineRunningBit, running, true, 0);
+            logEngineRunningBit(running);
+        }
         break;
 
     case CanScaling::kFrameDme4:
@@ -156,9 +161,10 @@ void CanDataModel::expireStaleInputs()
     expireInput(m_brake, kDirtyBrake);
     expireInput(m_oilPressureLow, 0);
     expireInput(m_absLampRaw, 0);
+    expireInput(m_engineRunningBit, 0);
 }
 
-bool CanDataModel::engineRunning() const
+bool CanDataModel::rpmRunning() const
 {
     // A stale rpm (0x316 gone quiet) can't vouch for a running engine.
     return fresh(m_rpmClock, kInputStaleMs) && m_rpm > kOilPressureMinRpm;
@@ -179,9 +185,44 @@ bool CanDataModel::Debounced::update(bool raw, qint64 riseMs, qint64 fallMs)
     return true;
 }
 
+void CanDataModel::updateEngineRunning()
+{
+    // Either source vouches for a running engine; only both going quiet or
+    // reading stopped for the full debounce drops it.
+    const bool raw = m_engineRunningBit.live() || rpmRunning();
+    if (m_engineRunning.update(raw, 0, kEngineStopDebounceMs)) {
+        m_dirty |= kDirtyEngineRunning;
+        qCInfo(lcCan).nospace() << "engine " << (m_engineRunning.state ? "running" : "stopped")
+                                << " (LV_ERU_CAN=" << m_engineRunningBit.live()
+                                << " fresh, rpm=" << (fresh(m_rpmClock, kInputStaleMs) ? m_rpm : -1) << ")";
+    }
+}
+
+void CanDataModel::logEngineRunningBit(bool bit)
+{
+    // LV_ERU_CAN is assumed from the DME2 spec. Logging each change next to
+    // the rpm shows whether it tracks the engine; if it never clears with the
+    // engine off, it would silently keep the idle auto-shutdown from arming.
+    // TODO: remove once the bit is verified on the car.
+    if (m_engineBitLog.shouldLog(bit, "DME2 LV_ERU_CAN"))
+        qCInfo(lcCan).nospace() << "DME2 LV_ERU_CAN=" << bit << " (rpm=" << m_rpm << ")";
+}
+
+bool CanDataModel::ChangeLog::shouldLog(int value, const char *tag)
+{
+    if (count > kBitChangeLogLimit || value == last)
+        return false;
+    last = value;
+    if (++count > kBitChangeLogLimit) {
+        qCInfo(lcCan) << tag << ": further changes not logged";
+        return false;
+    }
+    return true;
+}
+
 void CanDataModel::updateOilPressureWarning()
 {
-    const bool low = m_oilPressureLow.value && engineRunning();
+    const bool low = m_oilPressureLow.value && rpmRunning();
     if (m_oilPressureWarning.update(low, kOilPressureDebounceMs, kOilPressureDebounceMs))
         m_dirty |= kDirtyOilPressure;
 }
@@ -267,16 +308,9 @@ void CanDataModel::logAsc1StatusBits(quint8 byte0)
     // Log each change so a hard stop on track shows in the Device Log whether
     // any of them actually tracks ABS regulation.
     // TODO: remove (with kBasBit/kEbvBit) once the bits are verified on the car.
-    if (m_asc1StatusLogged > kAsc1StatusLogLimit)
-        return;
     const int bits = byte0 & (CanScaling::kBasBit | CanScaling::kEbvBit | CanScaling::kAbsLedBit);
-    if (bits == m_asc1StatusBits)
+    if (!m_asc1StatusLog.shouldLog(bits, "ASC1 status"))
         return;
-    m_asc1StatusBits = bits;
-    if (++m_asc1StatusLogged > kAsc1StatusLogLimit) {
-        qCInfo(lcCan) << "ASC1 status: further changes not logged";
-        return;
-    }
     qCInfo(lcCan).nospace() << "ASC1 status: BAS=" << bool(bits & CanScaling::kBasBit)
                             << " EBV=" << bool(bits & CanScaling::kEbvBit)
                             << " ABS_LED=" << bool(bits & CanScaling::kAbsLedBit);
@@ -337,6 +371,7 @@ void CanDataModel::emitNotifications()
     updateSpeedSource();
     expireStaleInputs();
     updateOilPressureWarning();
+    updateEngineRunning();
     expireAbsActive();
     // Rise debounce rides out the key-on bulb check; clears immediately.
     if (m_absFault.update(m_absLampRaw.value && m_hasRolled, kAbsFaultDebounceMs, 0))
@@ -360,4 +395,5 @@ void CanDataModel::emitNotifications()
     if (dirty & kDirtySteering)    emit steeringAngleChanged();
     if (dirty & kDirtyBrake)       emit brakePressedChanged();
     if (dirty & kDirtyThrottle)    emit throttleChanged();
+    if (dirty & kDirtyEngineRunning) emit engineRunningChanged();
 }

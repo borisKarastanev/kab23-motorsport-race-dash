@@ -53,6 +53,8 @@ public:
     QString currentVersion() const;
     QString latestVersion()  const { return m_latestVersion; }
     State   state()          const { return m_state; }
+    // Mid-install or rebooting — not to be interrupted (reset, poweroff).
+    bool    busy()           const { return m_state == Installing || m_state == Rebooting; }
     QString errorText()      const { return m_errorText; }
     QString installStage()   const { return m_installStage; }
     double  installProgress() const { return m_installProgress; }

@@ -38,6 +38,17 @@ Window {
         }
     }
 
+    // Idle auto-shutdown countdown with the engine off — above every page and
+    // modal, below the oil pressure warning. The page underneath stays alive.
+    ShutdownCountdown {
+        anchors.fill: parent
+        z: 900
+        visible: powerModel.shutdownPending || powerModel.shuttingDown
+        secondsRemaining: powerModel.secondsRemaining
+        shuttingDown: powerModel.shuttingDown
+        onCancelRequested: powerModel.cancelShutdown()
+    }
+
     // Low oil pressure emergency — above every page, so no page or overlay
     // can ever cover it, and nothing underneath needs to know about it.
     OilPressureWarning {

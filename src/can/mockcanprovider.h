@@ -20,4 +20,5 @@ private:
     int     m_prevRpm = 0;
     bool    m_oilPressureLow = false; // MOCK_OIL_PRESSURE_LOW — preview the emergency warning
     bool    m_absFault = false;       // MOCK_ABS_FAULT — preview the red ABS lamp
+    bool    m_engineStopped = false;  // MOCK_ENGINE_STOPPED — preview the idle auto-shutdown
 };

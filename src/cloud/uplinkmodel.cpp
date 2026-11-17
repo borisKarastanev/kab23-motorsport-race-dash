@@ -228,6 +228,14 @@ void UplinkModel::shutdown()
         m_client->disconnectFromBroker();
 }
 
+void UplinkModel::resume()
+{
+    if (!m_started)
+        return;
+    qCInfo(lcUplink) << "resuming after an aborted shutdown";
+    applyConfiguration();
+}
+
 void UplinkModel::clearSpool()
 {
     // Un-pairing means this dash is no longer provisioned for the car the
