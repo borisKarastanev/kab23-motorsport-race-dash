@@ -13,7 +13,13 @@ class CanDataModel;
 // showing, cancelling is the overlay's job (see eventFilter()).
 //
 // Armed only while the engine is stopped, the car is standing still and
-// nothing has blocked it (an update install in progress). While disarmed
+// nothing has blocked it (an update in progress). "Stopped" and "standing"
+// must be evidence, not silence: nothing arms before the first CAN frame (a
+// missing or slow adapter at boot reads exactly like a stopped engine), and
+// once the car has been seen moving it counts as moving until a trusted
+// source — fresh MK60 wheel speeds, or GPS with a fix — reads standstill.
+// Without that latch a CAN adapter dying mid-drive, with no RaceBox, would
+// read as engine off at 0 km/h. While disarmed
 // there is no event filter and no running timer, so a running engine costs
 // nothing. Restarting the engine mid-countdown drops it.
 //
@@ -36,6 +42,11 @@ public:
     // Above this the car is moving — never shut down, even with the engine
     // apparently off (a dead CAN adapter mid-session reads as "stopped").
     static constexpr int kMaxSpeedKmh   = 5;
+    // After `systemctl poweroff` is accepted, systemd stops this service
+    // within seconds. Still running after this long means the shutdown
+    // stalled or was cancelled — give the dash back rather than sit on the
+    // "shutting down" overlay forever.
+    static constexpr int kPoweroffWatchdogMs = 60000;
 
     PowerModel(CanDataModel *canModel, bool mockMode, QObject *parent = nullptr);
 
@@ -55,6 +66,10 @@ public:
     // Something that must not be interrupted by a poweroff (an update install).
     void setBlocked(bool blocked);
 
+    // RaceBox GPS fix. A GPS speed only counts as standstill evidence with a
+    // fix: a dropout reports 0 km/h.
+    void setGpsFix(bool hasFix);
+
     // The driver is still here — hide the countdown and restart the idle wait.
     Q_INVOKABLE void cancelShutdown();
 
@@ -72,6 +87,7 @@ protected:
 
 private:
     void updateArmed();
+    void updateMotion();
     bool conditionsHold() const;
     void arm();
     void disarm();
@@ -89,8 +105,11 @@ private:
     bool m_blocked = false;
     bool m_armed = false;
     bool m_shuttingDown = false;
+    bool m_seenMoving = false; // latched; see the class comment
+    bool m_gpsFix = false;
     int  m_secondsRemaining = 0;
     int  m_countdownSecs = kCountdownSecs;
     QTimer m_idleTimer;      // single-shot, restarted on every interaction
     QTimer m_countdownTimer; // one tick per second; running == countdown showing
+    QTimer m_poweroffWatchdog; // single-shot, started once poweroff is accepted
 };

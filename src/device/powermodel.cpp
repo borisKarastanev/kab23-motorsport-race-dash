@@ -25,9 +25,18 @@ PowerModel::PowerModel(CanDataModel *canModel, bool mockMode, QObject *parent)
     m_countdownTimer.setInterval(1000);
     connect(&m_countdownTimer, &QTimer::timeout, this, &PowerModel::onCountdownTick);
 
+    m_poweroffWatchdog.setSingleShot(true);
+    m_poweroffWatchdog.setInterval(kPoweroffWatchdogMs);
+    connect(&m_poweroffWatchdog, &QTimer::timeout, this, [this]() {
+        abortShutdown(QStringLiteral("system still running %1 s after poweroff was accepted")
+                          .arg(m_poweroffWatchdog.interval() / 1000), true);
+    });
+
     connect(m_canModel, &CanDataModel::engineRunningChanged, this, &PowerModel::updateArmed);
-    connect(m_canModel, &CanDataModel::speedChanged, this, &PowerModel::updateArmed);
-    updateArmed();
+    connect(m_canModel, &CanDataModel::canSeenChanged, this, &PowerModel::updateArmed);
+    connect(m_canModel, &CanDataModel::speedChanged, this, &PowerModel::updateMotion);
+    connect(m_canModel, &CanDataModel::speedFromWheelsChanged, this, &PowerModel::updateMotion);
+    updateMotion();
 }
 
 void PowerModel::setInputSource(QObject *source)
@@ -58,10 +67,39 @@ void PowerModel::setBlocked(bool blocked)
     updateArmed();
 }
 
+void PowerModel::setGpsFix(bool hasFix)
+{
+    if (hasFix == m_gpsFix)
+        return;
+    m_gpsFix = hasFix;
+    updateMotion();
+}
+
+void PowerModel::updateMotion()
+{
+    const int speed = m_canModel->speed();
+    // speed() is wheel-sourced while the wheel frames are fresh, otherwise
+    // the GPS. Either one reading motion latches it; only a source that can
+    // vouch for its 0 clears it — a stale-wheel fallback to an absent or
+    // fix-less GPS reads 0 too, and must not.
+    if (speed > kMaxSpeedKmh) {
+        if (!m_seenMoving)
+            qCInfo(lcApp) << "[Power] car moving — idle shutdown held until a trusted standstill";
+        m_seenMoving = true;
+    } else if (m_seenMoving && (m_canModel->speedFromWheels() || m_gpsFix)) {
+        qCInfo(lcApp) << "[Power] standstill confirmed by"
+                      << (m_canModel->speedFromWheels() ? "wheel speeds" : "GPS");
+        m_seenMoving = false;
+    }
+    updateArmed();
+}
+
 bool PowerModel::conditionsHold() const
 {
     return !m_blocked
+        && m_canModel->canSeen()
         && !m_canModel->engineRunning()
+        && !m_seenMoving
         && m_canModel->speed() <= kMaxSpeedKmh;
 }
 
@@ -182,7 +220,8 @@ void PowerModel::performShutdown()
                   [this](bool ok, int, const QString &out) {
                       if (!ok)
                           abortShutdown(Proc::lastNonEmptyLine(out), true);
-                      // else: the system is going down
+                      else // the system should be going down — see kPoweroffWatchdogMs
+                          m_poweroffWatchdog.start();
                   });
     });
 }
@@ -195,6 +234,7 @@ void PowerModel::abortShutdown(const QString &reason, bool flushed)
         qCWarning(lcApp).noquote() << "[Power] poweroff aborted:" << reason;
     else
         qCInfo(lcApp).noquote() << "[Power] poweroff aborted:" << reason;
+    m_poweroffWatchdog.stop();
     setShuttingDown(false);
     disarm();
     if (flushed)

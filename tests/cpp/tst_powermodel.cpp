@@ -15,18 +15,24 @@ static constexpr int kLongCountdown = 100; // can't run out under a test
 static constexpr int kTickMs    = 50;
 static constexpr int kWaitMs    = 2000;
 
-// A stopped engine on a quiet bus, with `window` standing in for the
-// QQuickWindow PowerModel watches in production.
+// A stopped engine (one 0-rpm frame, then a quiet bus), with `window`
+// standing in for the QQuickWindow PowerModel watches in production.
+// feedCan = false: no frame at all, like a missing adapter at boot.
 struct Rig {
     CanDataModel can;
     QObject window;
     PowerModel power{&can, true};
 
-    explicit Rig(int countdown = kCountdown)
+    explicit Rig(int countdown = kCountdown, bool feedCan = true)
     {
         power.setInputSource(&window);
         power.setTimings(kIdleMs, countdown, kTickMs);
+        if (feedCan) {
+            can.onFrame(CanFrames::rpm(0));
+            waitArmed(); // canSeen lands on CanDataModel's next notify tick
+        }
     }
+    bool waitArmed()        { return QTest::qWaitFor([this] { return power.armed(); }, kWaitMs); }
     bool waitPending()      { return QTest::qWaitFor([this] { return power.shutdownPending(); }, kWaitMs); }
     bool waitShuttingDown() { return QTest::qWaitFor([this] { return power.shuttingDown(); }, kWaitMs); }
 };
@@ -71,6 +77,8 @@ private slots:
     void inputElsewhereIgnored();
     void engineStartDisarmsAndCancels();
     void movingCarNeverArms();
+    void silentBusNeverArms();
+    void gpsDropoutKeepsMovingHold();
     void blockedDisarms();
     void mockPoweroffReturnsToIdleWatch();
     void lastMomentChangeAbortsWithoutFlushing();
@@ -79,7 +87,7 @@ private slots:
 void TestPowerModel::armedWithEngineStoppedAndStationary()
 {
     Rig rig;
-    QVERIFY(rig.power.armed());
+    QVERIFY(rig.waitArmed());
     QVERIFY(!rig.power.shutdownPending());
 }
 
@@ -169,13 +177,43 @@ void TestPowerModel::movingCarNeverArms()
     Rig rig;
 
     // No engine frames (a dead CAN adapter mid-session) but GPS says moving.
+    rig.power.setGpsFix(true);
     rig.can.setSpeed(60);
     QVERIFY(QTest::qWaitFor([&] { return !rig.power.armed(); }, kWaitMs));
     QTest::qWait(kIdleMs * 2);
     QVERIFY(!rig.power.shutdownPending());
 
+    rig.can.setSpeed(0); // GPS with a fix vouches for the standstill
+    QVERIFY(rig.waitArmed());
+}
+
+void TestPowerModel::silentBusNeverArms()
+{
+    // No CAN frame yet (adapter missing or slow at boot): "engine stopped"
+    // is only silence, so nothing arms however long it stays quiet.
+    Rig rig(kCountdown, /*feedCan=*/false);
+    QTest::qWait(kIdleMs * 2);
+    QVERIFY(!rig.power.armed());
+    QVERIFY(!rig.power.shutdownPending());
+
+    rig.can.onFrame(CanFrames::rpm(0));
+    QVERIFY(rig.waitArmed());
+}
+
+void TestPowerModel::gpsDropoutKeepsMovingHold()
+{
+    Rig rig;
+    rig.can.setSpeed(60);
+    QVERIFY(QTest::qWaitFor([&] { return !rig.power.armed(); }, kWaitMs));
+
+    // No fix: a GPS dropout (or no RaceBox) reports 0, which proves nothing.
     rig.can.setSpeed(0);
-    QVERIFY(QTest::qWaitFor([&] { return rig.power.armed(); }, kWaitMs));
+    QTest::qWait(kIdleMs * 2);
+    QVERIFY(!rig.power.armed());
+    QVERIFY(!rig.power.shutdownPending());
+
+    rig.power.setGpsFix(true); // the fix comes back, still at 0 km/h
+    QVERIFY(rig.waitArmed());
 }
 
 void TestPowerModel::blockedDisarms()

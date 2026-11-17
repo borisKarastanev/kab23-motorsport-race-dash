@@ -89,6 +89,9 @@ public:
     bool   throttleValid() const { return m_throttle.valid; }
     int    gear()        const { return m_gear; }
     bool   engineRunning() const { return m_engineRunning.state; }
+    // At least one CAN frame has arrived since start-up. Latches. Before it,
+    // engineRunning's false means "never heard", not "stopped".
+    bool   canSeen()       const { return m_canSeen; }
 
     // A wheel-speed reading older than this no longer drives speed — the GPS
     // fallback takes over so a dead ABS can't freeze the gauge at its last value.
@@ -145,6 +148,7 @@ signals:
     void throttleChanged();
     void gearChanged();
     void engineRunningChanged();
+    void canSeenChanged();
 
 private slots:
     void emitNotifications();
@@ -165,6 +169,7 @@ private:
     static constexpr quint16 kDirtyAbsActive   = 0x1000;
     static constexpr quint16 kDirtyAbsFault    = 0x2000;
     static constexpr quint16 kDirtyEngineRunning = 0x4000;
+    static constexpr quint16 kDirtyCanSeen       = 0x8000;
 
     enum Wheel { FL, FR, RL, RR }; // matches the 0x1F0 field order
 
@@ -250,5 +255,6 @@ private:
     int    m_gear        = 0;
 
     quint16 m_dirty = 0;
+    bool   m_canSeen = false;
     QTimer m_notifyTimer;
 };

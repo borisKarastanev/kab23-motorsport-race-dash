@@ -174,6 +174,8 @@ int main(int argc, char *argv[])
     // the uplink's `stop` are flushed synchronously on the way down: a
     // poweroff SIGTERMs the service, and aboutToQuit never fires on SIGTERM.
     PowerModel powerModel(&dataModel, useMock);
+    QObject::connect(&raceBoxModel, &RaceBoxModel::hasFixChanged, &powerModel,
+                     [&raceBoxModel, &powerModel] { powerModel.setGpsFix(raceBoxModel.hasFix()); });
     QObject::connect(&updateModel, &UpdateModel::stateChanged, &powerModel,
                      [&updateModel, &powerModel] { powerModel.setBlocked(updateModel.busy()); });
     // saveCurrentSession() is a no-op without laps.

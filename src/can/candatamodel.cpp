@@ -16,6 +16,11 @@ void CanDataModel::onFrame(const QCanBusFrame &frame)
 {
     const QByteArray &p = frame.payload();
 
+    if (!m_canSeen) {
+        m_canSeen = true;
+        m_dirty |= kDirtyCanSeen;
+    }
+
     switch (frame.frameId()) {
 
     case CanScaling::kFrameRpm:
@@ -396,4 +401,5 @@ void CanDataModel::emitNotifications()
     if (dirty & kDirtyBrake)       emit brakePressedChanged();
     if (dirty & kDirtyThrottle)    emit throttleChanged();
     if (dirty & kDirtyEngineRunning) emit engineRunningChanged();
+    if (dirty & kDirtyCanSeen)       emit canSeenChanged();
 }
