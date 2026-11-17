@@ -4,6 +4,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <sys/socket.h>
+#include <fcntl.h>
 #include <sys/un.h>
 #include <unistd.h>
 
@@ -17,7 +18,14 @@ void sdNotifyReady()
     if (pathLen == 0 || pathLen >= sizeof(sockaddr_un::sun_path))
         return; // NOTIFY_SOCKET is always short in practice; refuse to send a truncated path
 
+#ifdef SOCK_CLOEXEC
     const int fd = socket(AF_UNIX, SOCK_DGRAM | SOCK_CLOEXEC, 0);
+#else
+    // macOS has no SOCK_CLOEXEC; set the flag after creation instead.
+    const int fd = socket(AF_UNIX, SOCK_DGRAM, 0);
+    if (fd >= 0)
+        fcntl(fd, F_SETFD, FD_CLOEXEC);
+#endif
     if (fd < 0)
         return;
 
