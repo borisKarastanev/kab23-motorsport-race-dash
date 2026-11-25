@@ -11,6 +11,12 @@ Window {
     title: "BMW E46 Dashboard"
     color: "#0a0a0a"
 
+    // The scaled/rotated scene below. Anything that must cover the whole
+    // screen (a modal reparenting itself out of its page) parents to this, not
+    // to Window.contentItem: contentItem is outside the scene's transform, so
+    // it would draw — and take touches — in the panel's native orientation.
+    readonly property Item uiScene: scene
+
     // The UI is laid out in a 800x480 design space (the original 7" panel).
     // Every pixel size in the QML is a design-space size, so larger panels
     // (e.g. the 1280x720 Raspberry Pi Touch Display 2) are served by scaling

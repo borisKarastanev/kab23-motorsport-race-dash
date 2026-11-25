@@ -17,12 +17,15 @@ import QtQuick.Window 2.15
 // radius, margins/spacing) maps cleanly — this is the one that doesn't.
 Rectangle {
     id: root
-    // Reparent to the window's content item so the overlay covers the whole
-    // window — including the settings header — rather than only the detail
-    // content area below it, which would leave the BACK button tappable
-    // "through" the modal. Lifetime still follows this component's QML owner,
-    // so it's destroyed with the page that declared it.
-    parent: Window.contentItem
+    // Reparent to the window's scene (main.qml's uiScene) so the overlay
+    // covers the whole screen — including the settings header — rather than
+    // only the detail content area below it, which would leave the BACK button
+    // tappable "through" the modal. Not Window.contentItem: that sits outside
+    // the scene's scale/rotation, so on a rotated panel the picker would draw
+    // in portrait. contentItem stays as the fallback for a host window without
+    // uiScene (tests, previews). Lifetime still follows this component's QML
+    // owner, so it's destroyed with the page that declared it.
+    parent: Window.window && Window.window.uiScene ? Window.window.uiScene : Window.contentItem
     anchors.fill: parent
     z: 200
     visible: false
