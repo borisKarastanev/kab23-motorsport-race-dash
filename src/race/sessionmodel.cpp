@@ -49,7 +49,7 @@ void SessionModel::onLapCompleted(const RaceBoxLapResult &lap)
         return;
     const bool wasEmpty = m_currentLaps.isEmpty();
     // Numbered by this session, not by lap.lapNumber — see LapRecord.
-    m_currentLaps.append({m_currentLaps.size() + 1, lap.ms, lap.path, lap.sectorMs});
+    m_currentLaps.append({static_cast<int>(m_currentLaps.size()) + 1, lap.ms, lap.path, lap.sectorMs});
     qCInfo(lcApp) << "[SessionModel] lap appended —" << lap.ms << "ms | total laps:" << m_currentLaps.size();
     if (wasEmpty) {
         emit hasLapsChanged();

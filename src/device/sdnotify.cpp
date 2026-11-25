@@ -3,6 +3,7 @@
 #include <cstddef>
 #include <cstdlib>
 #include <cstring>
+#include <fcntl.h>
 #include <sys/socket.h>
 #include <sys/un.h>
 #include <unistd.h>
@@ -17,9 +18,18 @@ void sdNotifyReady()
     if (pathLen == 0 || pathLen >= sizeof(sockaddr_un::sun_path))
         return; // NOTIFY_SOCKET is always short in practice; refuse to send a truncated path
 
+#ifdef SOCK_CLOEXEC
     const int fd = socket(AF_UNIX, SOCK_DGRAM | SOCK_CLOEXEC, 0);
     if (fd < 0)
         return;
+#else
+    // macOS (dev builds) has no SOCK_CLOEXEC; set the flag right after
+    // creation instead. systemd never runs there, so the race is moot.
+    const int fd = socket(AF_UNIX, SOCK_DGRAM, 0);
+    if (fd < 0)
+        return;
+    (void)fcntl(fd, F_SETFD, FD_CLOEXEC); // best effort: a leaked fd is harmless on a dev box
+#endif
 
     sockaddr_un addr{};
     addr.sun_family = AF_UNIX;
