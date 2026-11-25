@@ -57,6 +57,15 @@ Item {
     readonly property bool shiftActive: shiftOnce || capsLock
     readonly property int kCapsLockHoldMs: 2000
 
+    // Back to lowercase letters. Called by hosting modals on open, so a
+    // keyboard last left on symbols or caps lock doesn't greet the next entry
+    // that way.
+    function reset() {
+        symbols = false
+        shiftOnce = false
+        capsLock = false
+    }
+
     readonly property var letterRows: [
         ["q","w","e","r","t","y","u","i","o","p"],
         ["a","s","d","f","g","h","j","k","l"],

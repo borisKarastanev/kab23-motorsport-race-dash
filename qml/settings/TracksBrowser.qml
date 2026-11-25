@@ -28,31 +28,61 @@ Item {
                     Layout.fillWidth: true
                     Layout.preferredWidth: 2
                     height: 30
-                    color: "#111111"
                     border.color: "#2a2a2a"
                     border.width: 1
                     radius: 2
 
-                    TextInput {
-                        id: searchInput
+                    // Tap-to-edit readout rather than a TextInput: the Pi has
+                    // no system input method, so a focused TextInput never
+                    // gets a keyboard. Entry goes through the shared
+                    // TextEntryModal / OnScreenKeyboard instead.
+                    color: searchArea.pressed ? "#1a1a1a" : "#111111"
+
+                    MouseArea {
+                        id: searchArea
                         anchors.fill: parent
+                        onClicked: {
+                            searchEntry.seed = trackModel.searchText
+                            searchEntry.visible = true
+                        }
+                    }
+
+                    Text {
+                        anchors.left: parent.left
                         anchors.leftMargin: 8
+                        anchors.right: clearSearch.visible ? clearSearch.left : parent.right
                         anchors.rightMargin: 8
-                        verticalAlignment: TextInput.AlignVCenter
-                        color: "#cccccc"
+                        anchors.verticalCenter: parent.verticalCenter
+                        text: trackModel.searchText.length > 0 ? trackModel.searchText : "SEARCH…"
+                        color: trackModel.searchText.length > 0 ? "#cccccc" : "#444444"
                         font.pixelSize: 11
                         font.family: "monospace"
-                        clip: true
-                        onTextChanged: trackModel.searchText = text
+                        font.letterSpacing: trackModel.searchText.length > 0 ? 0 : 1
+                        elide: Text.ElideRight
+                    }
+
+                    // One-tap clear, so emptying the filter doesn't need a
+                    // round of backspaces in the modal.
+                    Item {
+                        id: clearSearch
+                        visible: trackModel.searchText.length > 0
+                        anchors.right: parent.right
+                        anchors.top: parent.top
+                        anchors.bottom: parent.bottom
+                        width: 30
 
                         Text {
-                            anchors.verticalCenter: parent.verticalCenter
-                            visible: searchInput.text.length === 0
-                            text: "SEARCH…"
-                            color: "#444444"
+                            anchors.centerIn: parent
+                            text: "✕"
+                            color: clearSearchArea.pressed ? "#cccccc" : "#888888"
                             font.pixelSize: 11
                             font.family: "monospace"
-                            font.letterSpacing: 1
+                        }
+
+                        MouseArea {
+                            id: clearSearchArea
+                            anchors.fill: parent
+                            onClicked: trackModel.searchText = ""
                         }
                     }
                 }
@@ -380,5 +410,22 @@ Item {
                 }
             }
         }
+    }
+
+    // ── search entry modal ──────────────────────────────────
+    // Outside the ColumnLayout so it covers the whole page.
+    TextEntryModal {
+        id: searchEntry
+        anchors.fill: parent
+        visible: false
+        title: "SEARCH TRACKS"
+        allowEmpty: true   // submitting an empty field clears the filter
+        onSubmitted: function(text) {
+            // Trimmed to match TrackModel's own matching, so a spaces-only
+            // entry clears the filter instead of showing a blank "active" one.
+            trackModel.searchText = text.trim()
+            searchEntry.visible = false
+        }
+        onCancelled: searchEntry.visible = false
     }
 }

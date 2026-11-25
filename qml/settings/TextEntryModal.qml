@@ -17,13 +17,22 @@ ModalScaffold {
     // Prefills the field when the modal opens, so editing an existing value is
     // not a retype-from-scratch.
     property string seed: ""
+    // Lets SUBMIT accept an empty field, for callers where "nothing" is a
+    // meaningful value (e.g. clearing a search filter).
+    property bool allowEmpty: false
 
     signal submitted(string text)
     signal cancelled()
 
     property string enteredText: ""
+    readonly property bool canSubmit: allowEmpty || enteredText.length > 0
 
-    onVisibleChanged: if (visible) enteredText = seed
+    onVisibleChanged: {
+        if (visible) {
+            enteredText = seed
+            keyboard.reset()
+        }
+    }
 
     Text {
         text: root.title
@@ -59,6 +68,7 @@ ModalScaffold {
     }
 
     OnScreenKeyboard {
+        id: keyboard
         width: parent.width
 
         onKeyPressed: function(ch) { root.enteredText += ch }
@@ -67,7 +77,7 @@ ModalScaffold {
                 root.enteredText = root.enteredText.slice(0, -1)
         }
         onDone: {
-            if (root.enteredText.length > 0)
+            if (root.canSubmit)
                 root.submitted(root.enteredText)
         }
     }
@@ -91,8 +101,8 @@ ModalScaffold {
             textColor: "#00cc44"
             pressedColor: "#112211"
             border.color: "#2a4a2a"
-            opacity: root.enteredText.length > 0 ? 1.0 : 0.5
-            enabled: root.enteredText.length > 0
+            opacity: root.canSubmit ? 1.0 : 0.5
+            enabled: root.canSubmit
             onClicked: root.submitted(root.enteredText)
         }
     }
