@@ -54,7 +54,13 @@ Item {
     // it returns to the dashboard, otherwise it pops one level off the stack.
     DragHandler {
         target: null
-        yAxis.enabled: false
+        // Qt applies the axis restriction to the drag delta in window
+        // coordinates, not this item's. With the scene rotated 90/270
+        // (DASH_ROTATION, main.qml) a horizontal swipe here is vertical in
+        // the window, so restrict whichever window axis is "our" vertical.
+        readonly property bool sceneTurned: displayRotation === 90 || displayRotation === 270
+        xAxis.enabled: !sceneTurned
+        yAxis.enabled: sceneTurned
 
         property real startX: 0
 

@@ -222,9 +222,14 @@ Item {
                     startPanY = root.panY
                 }
             }
-            onTranslationChanged: {
-                root.panX = startPanX + translation.x
-                root.panY = startPanY + translation.y
+            // Not `translation`: that is measured in window pixels, which
+            // differ from this item's once main.qml scales (1280x720 panel) or
+            // rotates (DASH_ROTATION) the scene. The centroid is item-local.
+            onCentroidChanged: {
+                if (!active)
+                    return
+                root.panX = startPanX + centroid.position.x - centroid.pressPosition.x
+                root.panY = startPanY + centroid.position.y - centroid.pressPosition.y
                 root.clampPan()
             }
         }
