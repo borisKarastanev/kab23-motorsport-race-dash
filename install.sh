@@ -475,26 +475,66 @@ sudo systemctl disable --now dphys-swapfile.service rpi-eeprom-update.service 2>
 
 step "Display orientation (optional)"
 # Panels that are natively portrait (e.g. the Raspberry Pi Touch Display 2,
-# 720x1280) need rotating to landscape. Opt in with DASH_ROTATION=90|180|270
-# (e.g. `DASH_ROTATION=90 ./install.sh`), clockwise. The app rotates its own
-# Qt Quick scene (QT_QPA_EGLFS_ROTATION would not: it only affects QWidget
-# raster content). Written as a systemd drop-in, which
-# survives later updates: install_dash_service only rewrites the main unit, and
-# in-app updates run this script without the variable, which leaves an existing
-# drop-in untouched. DASH_ROTATION=0 removes it.
+# 720x1280) need rotating to landscape, and any panel may be mounted upside
+# down. Opt in with DASH_ROTATION=90|180|270, clockwise (e.g.
+# `DASH_ROTATION=270 ./install.sh`). Two things are set from it:
+#
+#   1. The dashboard: a systemd drop-in passing DASH_ROTATION to the app,
+#      which rotates its own Qt Quick scene (QT_QPA_EGLFS_ROTATION would not:
+#      it only affects QWidget raster content).
+#   2. The boot splash and console: the kernel's panel_orientation hint on the
+#      panel's connector in cmdline.txt, which Plymouth and fbcon honour.
+#      eglfs ignores it, so it never double-rotates the dashboard.
+#
+# Both survive later updates: install_dash_service only rewrites the main
+# unit, and in-app updates run this script without the variable, which leaves
+# them untouched. DASH_ROTATION=0 removes both. The splash change needs a reboot.
 ROT_DROPIN_DIR=/etc/systemd/system/$DASH_SERVICE.d
 ROT_DROPIN="$ROT_DROPIN_DIR/display.conf"
+
+# The connected display's DRM connector name (e.g. DSI-1), DSI preferred.
+display_connector() {
+    local s name
+    for s in /sys/class/drm/card*-DSI-*/status /sys/class/drm/card*-*/status; do
+        [ -f "$s" ] && [ "$(cat "$s")" = connected ] || continue
+        name=$(basename "$(dirname "$s")")
+        echo "${name#card*-}"
+        return 0
+    done
+    return 1
+}
+
+# $1 = panel_orientation value, or empty to remove. Replaces any earlier
+# video=<connector>: token (ours or hand-added), so reruns never stack them.
+set_splash_orientation() {
+    local conn mode tok
+    [ -f "$CMDLINE" ] || { echo "WARNING: $CMDLINE not found — splash orientation not set"; return 0; }
+    conn=$(display_connector) || { echo "WARNING: no connected display found — splash orientation not set"; return 0; }
+    sudo sed -i -E "1 s/[[:space:]]*video=${conn}:[^[:space:]]*//g" "$CMDLINE"
+    [ -n "$1" ] || { echo "    (splash orientation removed for $conn)"; return 0; }
+    mode=$(head -n1 /sys/class/drm/card*-"$conn"/modes 2> /dev/null || true)
+    tok="video=${conn}:${mode:+${mode}@60,}panel_orientation=$1"
+    sudo sed -i "1 s|\$| $tok|" "$CMDLINE"
+    echo "    (splash: $tok)"
+}
+
 case "${DASH_ROTATION:-}" in
     90|180|270)
         sudo mkdir -p "$ROT_DROPIN_DIR"
         printf '[Service]\nEnvironment=DASH_ROTATION=%s\n' "$DASH_ROTATION" \
             | sudo tee "$ROT_DROPIN" > /dev/null
         sudo systemctl daemon-reload
-        echo "    (rotation $DASH_ROTATION written to $ROT_DROPIN)" ;;
+        echo "    (rotation $DASH_ROTATION written to $ROT_DROPIN)"
+        case "$DASH_ROTATION" in
+            90)  set_splash_orientation right_side_up ;;
+            180) set_splash_orientation upside_down ;;
+            270) set_splash_orientation left_side_up ;;
+        esac ;;
     0)
         sudo rm -f "$ROT_DROPIN"
         sudo systemctl daemon-reload
-        echo "    (rotation drop-in removed)" ;;
+        echo "    (rotation drop-in removed)"
+        set_splash_orientation "" ;;
     "")
         echo "    (DASH_ROTATION not set — leaving display orientation unchanged)" ;;
     *)
